@@ -35,6 +35,19 @@ export type HeartbeatInput = {
   appVersion?: string;
 };
 
+export type RemoteActionCreateInput = {
+  actionType: "clear_local_usage" | "force_lock" | "sync_config";
+  deviceId?: string;
+  payload?: Record<string, unknown>;
+  sessionId: string;
+};
+
+export type RemoteActionCompleteInput = {
+  errorMessage?: string;
+  ok: boolean;
+  result?: Record<string, unknown>;
+};
+
 export async function readJsonBody<T>(request: Request) {
   try {
     return {
@@ -243,5 +256,72 @@ export function validateHeartbeatInput(input: unknown) {
       usageAccessGranted: payload.usageAccessGranted as boolean | undefined,
       usedMinutes: payload.usedMinutes as number | undefined,
     } satisfies HeartbeatInput,
+  };
+}
+
+const ALLOWED_REMOTE_ACTIONS = new Set(["force_lock", "clear_local_usage", "sync_config"]);
+
+export function validateRemoteActionCreateInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const sessionId = normalizeRequiredString(payload.sessionId);
+  const actionType = normalizeRequiredString(payload.actionType);
+
+  if (!sessionId) {
+    return { ok: false as const, response: jsonError(400, "sessionId is required.") };
+  }
+
+  if (!actionType || !ALLOWED_REMOTE_ACTIONS.has(actionType)) {
+    return { ok: false as const, response: jsonError(400, "actionType must be one of: force_lock, clear_local_usage, sync_config.") };
+  }
+
+  if (payload.deviceId !== undefined && normalizeRequiredString(payload.deviceId) === null) {
+    return { ok: false as const, response: jsonError(400, "deviceId must be a non-empty string when provided.") };
+  }
+
+  if (payload.payload !== undefined && (typeof payload.payload !== "object" || payload.payload === null || Array.isArray(payload.payload))) {
+    return { ok: false as const, response: jsonError(400, "payload must be a JSON object when provided.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      actionType: actionType as RemoteActionCreateInput["actionType"],
+      deviceId: normalizeOptionalString(payload.deviceId) ?? undefined,
+      payload: (payload.payload as Record<string, unknown> | undefined) ?? {},
+      sessionId,
+    } satisfies RemoteActionCreateInput,
+  };
+}
+
+export function validateRemoteActionCompleteInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+
+  if (typeof payload.ok !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "ok must be a boolean.") };
+  }
+
+  if (payload.result !== undefined && (typeof payload.result !== "object" || payload.result === null || Array.isArray(payload.result))) {
+    return { ok: false as const, response: jsonError(400, "result must be a JSON object when provided.") };
+  }
+
+  if (payload.errorMessage !== undefined && normalizeRequiredString(payload.errorMessage) === null) {
+    return { ok: false as const, response: jsonError(400, "errorMessage must be a non-empty string when provided.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      errorMessage: normalizeOptionalString(payload.errorMessage) ?? undefined,
+      ok: payload.ok,
+      result: (payload.result as Record<string, unknown> | undefined) ?? {},
+    } satisfies RemoteActionCompleteInput,
   };
 }

@@ -144,6 +144,30 @@ create index if not exists device_heartbeats_session_id_received_at_idx
 create index if not exists device_heartbeats_device_id_received_at_idx
   on public.device_heartbeats (device_id, received_at desc);
 
+create table if not exists public.device_remote_actions (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  device_id uuid references public.devices(id) on delete set null,
+  action_type text not null,
+  status text not null default 'pending',
+  payload jsonb not null default '{}'::jsonb,
+  result_payload jsonb not null default '{}'::jsonb,
+  requested_at timestamptz not null default now(),
+  completed_at timestamptz,
+  failed_at timestamptz,
+  error_message text,
+  constraint device_remote_actions_status_check
+    check (status in ('pending', 'completed', 'failed', 'cancelled')),
+  constraint device_remote_actions_action_type_check
+    check (action_type in ('force_lock', 'clear_local_usage', 'sync_config'))
+);
+
+create index if not exists device_remote_actions_session_status_requested_idx
+  on public.device_remote_actions (session_id, status, requested_at asc);
+
+create index if not exists device_remote_actions_device_status_requested_idx
+  on public.device_remote_actions (device_id, status, requested_at asc);
+
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at
 before update on public.session_requests
