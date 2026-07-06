@@ -8,13 +8,17 @@ import { type SessionRequestRow } from "@/lib/server/session-flow";
 type SessionRow = {
   activated_at: string;
   daily_limit_minutes: number;
+  device_id: string;
   ends_at: string;
   forced_sleep_enabled: boolean;
   id: string;
   session_days: number;
+  sleep_end_time: string;
+  sleep_start_time: string;
   starts_at: string;
   status: string;
   timezone: string | null;
+  updated_at: string;
 };
 
 function addDays(timestamp: Date, days: number) {
@@ -112,11 +116,13 @@ export async function POST(request: Request) {
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
+      sleep_end_time: "07:00",
+      sleep_start_time: "23:00",
       starts_at: startsAt.toISOString(),
       status: "active",
       timezone: validation.data.timezone ?? null,
     })
-    .select("id, session_days, daily_limit_minutes, forced_sleep_enabled, timezone, starts_at, ends_at, status, activated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, activated_at, updated_at")
     .maybeSingle<SessionRow>();
 
   if (sessionError) {
@@ -148,13 +154,18 @@ export async function POST(request: Request) {
     ok: true,
     session: {
       id: session.id,
+      deviceId: session.device_id,
       sessionDays: session.session_days,
       dailyLimitMinutes: session.daily_limit_minutes,
       forcedSleepEnabled: session.forced_sleep_enabled,
+      sleepEndTime: session.sleep_end_time,
+      sleepStartTime: session.sleep_start_time,
       timezone: session.timezone,
       startsAt: session.starts_at,
       endsAt: session.ends_at,
       status: session.status,
+      updatedAt: session.updated_at,
+      activatedAt: session.activated_at,
     },
   });
 }

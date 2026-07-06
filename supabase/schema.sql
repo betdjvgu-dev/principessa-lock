@@ -55,12 +55,15 @@ create table if not exists public.sessions (
   session_days integer not null,
   daily_limit_minutes integer not null,
   forced_sleep_enabled boolean not null default false,
+  sleep_start_time text not null default '23:00',
+  sleep_end_time text not null default '07:00',
   timezone text,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
   status text not null default 'active',
   activated_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   constraint sessions_status_check
     check (status in ('active', 'completed', 'revoked')),
   constraint sessions_session_days_check
@@ -76,6 +79,15 @@ create index if not exists sessions_device_id_idx
 
 create index if not exists sessions_status_idx
   on public.sessions (status, created_at desc);
+
+alter table public.sessions
+  add column if not exists sleep_start_time text not null default '23:00';
+
+alter table public.sessions
+  add column if not exists sleep_end_time text not null default '07:00';
+
+alter table public.sessions
+  add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
@@ -97,6 +109,41 @@ create table if not exists public.session_daily_usage (
 create index if not exists session_daily_usage_session_id_idx
   on public.session_daily_usage (session_id, local_date desc);
 
+create table if not exists public.device_heartbeats (
+  id uuid primary key default gen_random_uuid(),
+  device_id uuid references public.devices(id) on delete set null,
+  session_id uuid references public.sessions(id) on delete set null,
+  received_at timestamptz not null default now(),
+  device_name text,
+  platform text not null default 'android',
+  timezone text,
+  app_version text,
+  session_status text,
+  protection_state text,
+  forced_sleep_enabled boolean,
+  inside_sleep_window boolean,
+  usage_access_granted boolean,
+  device_admin_granted boolean,
+  blocking_active boolean,
+  used_minutes integer,
+  daily_limit_minutes integer,
+  remaining_minutes integer,
+  limit_reached boolean,
+  battery_optimization_ignored boolean,
+  last_usage_refresh_at timestamptz,
+  local_date date,
+  payload jsonb not null default '{}'::jsonb
+);
+
+create index if not exists device_heartbeats_received_at_idx
+  on public.device_heartbeats (received_at desc);
+
+create index if not exists device_heartbeats_session_id_received_at_idx
+  on public.device_heartbeats (session_id, received_at desc);
+
+create index if not exists device_heartbeats_device_id_received_at_idx
+  on public.device_heartbeats (device_id, received_at desc);
+
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at
 before update on public.session_requests
@@ -109,3 +156,8 @@ before update on public.session_daily_usage
 for each row
 execute function public.set_updated_at();
 
+drop trigger if exists set_sessions_updated_at on public.sessions;
+create trigger set_sessions_updated_at
+before update on public.sessions
+for each row
+execute function public.set_updated_at();
