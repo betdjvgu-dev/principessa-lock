@@ -3,6 +3,8 @@ node_modules/
 .env
 .env.local
 .env.*.local
+*firebase-adminsdk*.json
+*service-account*.json
 out/
 dist/
 coverage/

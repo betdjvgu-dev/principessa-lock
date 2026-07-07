@@ -13,6 +13,22 @@ export type ActivationInput = {
   timezone?: string;
 };
 
+export type PendingSessionTermsInput = {
+  dailyLimitMinutes: number;
+  forcedSleepEnabled: boolean;
+  sessionDays: number;
+};
+
+export type PairInput = {
+  deviceName: string;
+  pairingCode: string;
+  timezone?: string;
+};
+
+export type FcmTokenInput = {
+  fcmToken: string;
+};
+
 export type HeartbeatInput = {
   accessibilityGranted?: boolean;
   accessibilityRunning?: boolean;
@@ -22,9 +38,11 @@ export type HeartbeatInput = {
   blockingMethod?: string;
   blockingRequired?: boolean;
   dailyLimitMinutes?: number;
+  debuggerAttached?: boolean;
   deviceAdminGranted?: boolean;
   deviceId?: string;
   deviceName: string;
+  emulatorDetected?: boolean;
   forcedSleepEnabled?: boolean;
   forcedSleepReady?: boolean;
   insideSleepWindow?: boolean;
@@ -56,6 +74,7 @@ export type HeartbeatInput = {
   sessionStatus: string;
   timezone?: string;
   remoteActionQueueLength?: number;
+  rootDetected?: boolean;
   usageAccessGranted?: boolean;
   usedMinutes?: number;
   appVersion?: string;
@@ -148,6 +167,87 @@ export function validateSessionRequestInput(input: unknown) {
       forcedSleepEnabled: payload.forcedSleepEnabled,
       sessionDays: Number(payload.sessionDays),
     } satisfies SessionRequestInput,
+  };
+}
+
+export function validatePendingSessionTermsInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+
+  if (!isIntegerInRange(payload.sessionDays, 1, 30)) {
+    return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30.") };
+  }
+
+  if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+    return {
+      ok: false as const,
+      response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
+    };
+  }
+
+  if (typeof payload.forcedSleepEnabled !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      dailyLimitMinutes: Number(payload.dailyLimitMinutes),
+      forcedSleepEnabled: payload.forcedSleepEnabled,
+      sessionDays: Number(payload.sessionDays),
+    } satisfies PendingSessionTermsInput,
+  };
+}
+
+export function validatePairInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const pairingCode = normalizeRequiredString(payload.pairingCode);
+  const deviceName = normalizeRequiredString(payload.deviceName);
+
+  if (!pairingCode) {
+    return { ok: false as const, response: jsonError(400, "pairingCode is required.") };
+  }
+
+  if (!deviceName) {
+    return { ok: false as const, response: jsonError(400, "deviceName is required.") };
+  }
+
+  if (payload.timezone !== undefined && normalizeRequiredString(payload.timezone) === null) {
+    return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      deviceName,
+      pairingCode,
+      timezone: normalizeRequiredString(payload.timezone) ?? undefined,
+    } satisfies PairInput,
+  };
+}
+
+export function validateFcmTokenInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const fcmToken = normalizeRequiredString(payload.fcmToken);
+
+  if (!fcmToken) {
+    return { ok: false as const, response: jsonError(400, "fcmToken is required.") };
+  }
+
+  return {
+    ok: true as const,
+    data: { fcmToken } satisfies FcmTokenInput,
   };
 }
 
@@ -260,7 +360,10 @@ export function validateHeartbeatInput(input: unknown) {
     !isOptionalBoolean(payload.batteryOptimizationIgnored) ||
     !isOptionalBoolean(payload.protectionHealthy) ||
     !isOptionalBoolean(payload.serviceRunning) ||
-    !isOptionalBoolean(payload.foregroundServiceRunning)
+    !isOptionalBoolean(payload.foregroundServiceRunning) ||
+    !isOptionalBoolean(payload.rootDetected) ||
+    !isOptionalBoolean(payload.emulatorDetected) ||
+    !isOptionalBoolean(payload.debuggerAttached)
   ) {
     return { ok: false as const, response: jsonError(400, "Heartbeat boolean fields must be booleans when provided.") };
   }
@@ -349,9 +452,11 @@ export function validateHeartbeatInput(input: unknown) {
       blockingMethod: normalizeOptionalString(payload.blockingMethod) ?? undefined,
       blockingRequired: payload.blockingRequired as boolean | undefined,
       dailyLimitMinutes: payload.dailyLimitMinutes as number | undefined,
+      debuggerAttached: payload.debuggerAttached as boolean | undefined,
       deviceAdminGranted: payload.deviceAdminGranted as boolean | undefined,
       deviceId: normalizeOptionalString(payload.deviceId) ?? undefined,
       deviceName,
+      emulatorDetected: payload.emulatorDetected as boolean | undefined,
       foregroundServiceRunning: payload.foregroundServiceRunning as boolean | undefined,
       forcedSleepEnabled: payload.forcedSleepEnabled as boolean | undefined,
       forcedSleepReady: payload.forcedSleepReady as boolean | undefined,
@@ -383,6 +488,7 @@ export function validateHeartbeatInput(input: unknown) {
       sessionStatus,
       timezone: normalizeOptionalString(payload.timezone) ?? undefined,
       remoteActionQueueLength: payload.remoteActionQueueLength as number | undefined,
+      rootDetected: payload.rootDetected as boolean | undefined,
       usageAccessGranted: payload.usageAccessGranted as boolean | undefined,
       usedMinutes: payload.usedMinutes as number | undefined,
     } satisfies HeartbeatInput,

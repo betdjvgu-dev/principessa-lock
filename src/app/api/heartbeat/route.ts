@@ -15,7 +15,7 @@ function parseTimestampOrNull(value: string | undefined) {
 }
 
 export async function POST(request: Request) {
-  const rateLimitError = enforceRateLimit({
+  const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many heartbeat requests. Please wait before sending another heartbeat.",
     limit: 120,
     request,
@@ -68,9 +68,11 @@ export async function POST(request: Request) {
     blocking_method: heartbeat.blockingMethod ?? null,
     blocking_required: heartbeat.blockingRequired ?? null,
     daily_limit_minutes: heartbeat.dailyLimitMinutes ?? null,
+    debugger_attached: heartbeat.debuggerAttached ?? null,
     device_admin_granted: heartbeat.deviceAdminGranted ?? null,
     device_id: deviceAuth.device.id,
     device_name: heartbeat.deviceName,
+    emulator_detected: heartbeat.emulatorDetected ?? null,
     foreground_service_running: heartbeat.foregroundServiceRunning ?? heartbeat.serviceRunning ?? null,
     forced_sleep_enabled: heartbeat.forcedSleepEnabled ?? null,
     forced_sleep_ready: heartbeat.forcedSleepReady ?? null,
@@ -102,6 +104,7 @@ export async function POST(request: Request) {
     service_running: heartbeat.serviceRunning ?? null,
     session_id: heartbeat.sessionId,
     session_status: heartbeat.sessionStatus,
+    root_detected: heartbeat.rootDetected ?? null,
     sub_id: deviceAuth.device.subId,
     timezone: heartbeat.timezone ?? null,
     remote_action_queue_length: heartbeat.remoteActionQueueLength ?? null,

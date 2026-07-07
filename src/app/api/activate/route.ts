@@ -31,7 +31,7 @@ function addDays(timestamp: Date, days: number) {
 }
 
 export async function POST(request: Request) {
-  const rateLimitError = enforceRateLimit({
+  const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many activation attempts. Please wait before trying again.",
     limit: 20,
     request,

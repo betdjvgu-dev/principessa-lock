@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -48,6 +49,12 @@ function formatSessionResponse(session: SessionRow) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const rateLimitError = await enforceAdminRateLimit(request, "sessions:revoke");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {

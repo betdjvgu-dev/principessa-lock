@@ -24,40 +24,25 @@ npm run dev
 
 This opens the Electron desktop app window.
 
-## 3. Create a test pending request
+## 3. Create a test sub, pairing code, and session request
 
-Using PowerShell:
+`POST /api/session-requests` now requires a paired device's bearer token, so use the
+Desktop Admin app (see step 4) to create a sub and generate a pairing code, then use
+`POST /api/pair` with that code to create the device and its first session in one step
+(see `docs/e2e-test-checklist.md` for the full flow).
 
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:3000/api/session-requests `
-  -ContentType "application/json" `
-  -Body '{"deviceName":"Test Phone A","sessionDays":3,"dailyLimitMinutes":30,"forcedSleepEnabled":true}'
-```
-
-Create a second request so you can test reject too:
-
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:3000/api/session-requests `
-  -ContentType "application/json" `
-  -Body '{"deviceName":"Test Phone B","sessionDays":5,"dailyLimitMinutes":45,"forcedSleepEnabled":false}'
-```
-
-## 4. Enter desktop settings
+## 4. Enter desktop settings and log in
 
 Inside the Desktop Admin App:
 
-1. Set `Backend URL` to `http://localhost:3000`
-2. Set `Admin API Token` to your real `ADMIN_API_TOKEN`
-3. Click `Save Settings`
+1. Set `Backend URL` to `http://localhost:3000` and click `Save Backend URL`.
+2. Enter the admin email/password (created once via Supabase Dashboard -> Authentication
+   -> Users) and click `Log In`.
 
 Expected result:
 
-- settings save locally
-- the app refreshes pending requests automatically
+- the session token saves locally (encrypted at rest via Electron `safeStorage`)
+- the app refreshes pending requests, sessions, and subs automatically
 
 ## 5. Refresh pending requests
 

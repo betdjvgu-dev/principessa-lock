@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import {
   readJsonBody,
   validateAdminSessionUpdateInput,
@@ -93,6 +94,12 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const rateLimitError = await enforceAdminRateLimit(request, "sessions:update");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {

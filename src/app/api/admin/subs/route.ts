@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -16,6 +17,12 @@ type CreateSubInput = {
 };
 
 export async function GET(request: Request) {
+  const rateLimitError = await enforceAdminRateLimit(request, "subs:list");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {
@@ -40,6 +47,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const rateLimitError = await enforceAdminRateLimit(request, "subs:create");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {

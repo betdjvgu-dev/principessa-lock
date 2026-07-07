@@ -2,8 +2,12 @@ import "server-only";
 
 import { createHash, randomInt } from "node:crypto";
 
-const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-const DIGITS = "23456789";
+// 32-character alphabet (letters + digits, ambiguous 0/O/1/I/L excluded) across four
+// groups gives ~80 bits of entropy, versus the old fixed "PRIN-"/"PAIR-" prefix + 2 groups
+// (~30 bits) which also telegraphed the code's purpose via a guessable static prefix.
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_GROUP_COUNT = 4;
+const CODE_GROUP_LENGTH = 4;
 
 function randomCharacters(source: string, length: number) {
   let value = "";
@@ -15,6 +19,10 @@ function randomCharacters(source: string, length: number) {
   return value;
 }
 
+function generateCode() {
+  return Array.from({ length: CODE_GROUP_COUNT }, () => randomCharacters(CODE_ALPHABET, CODE_GROUP_LENGTH)).join("-");
+}
+
 export function normalizeActivationCode(activationCode: string) {
   return activationCode.trim().toUpperCase();
 }
@@ -24,7 +32,7 @@ export function hashActivationCode(activationCode: string) {
 }
 
 export function generateActivationCode() {
-  return `PRIN-${randomCharacters(LETTERS, 4)}-${randomCharacters(DIGITS, 4)}`;
+  return generateCode();
 }
 
 export function normalizePairingCode(pairingCode: string) {
@@ -36,6 +44,5 @@ export function hashPairingCode(pairingCode: string) {
 }
 
 export function generatePairingCode() {
-  return `PAIR-${randomCharacters(LETTERS, 4)}-${randomCharacters(DIGITS, 4)}`;
+  return generateCode();
 }
-

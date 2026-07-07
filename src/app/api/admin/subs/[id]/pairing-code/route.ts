@@ -1,6 +1,12 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { generatePairingCode, hashPairingCode } from "@/lib/server/activation-codes";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
+import {
+  readJsonBody,
+  validatePendingSessionTermsInput,
+  type PendingSessionTermsInput,
+} from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -38,6 +44,12 @@ async function generateUniquePairingCode(supabase: ReturnType<typeof getSupabase
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const rateLimitError = await enforceAdminRateLimit(request, "subs:pairing-code");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {
@@ -48,6 +60,18 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (!id.trim()) {
     return jsonError(400, "Sub id is required.");
+  }
+
+  const bodyResult = await readJsonBody<PendingSessionTermsInput>(request);
+
+  if (!bodyResult.ok) {
+    return bodyResult.response;
+  }
+
+  const validation = validatePendingSessionTermsInput(bodyResult.data);
+
+  if (!validation.ok) {
+    return validation.response;
   }
 
   const supabase = getSupabaseAdminClient();
@@ -88,6 +112,9 @@ export async function POST(request: Request, context: RouteContext) {
     .update({
       pairing_code_expires_at: expiresAt,
       pairing_code_hash: uniqueCode.pairingCodeHash,
+      pending_daily_limit_minutes: validation.data.dailyLimitMinutes,
+      pending_forced_sleep_enabled: validation.data.forcedSleepEnabled,
+      pending_session_days: validation.data.sessionDays,
     })
     .eq("id", id);
 

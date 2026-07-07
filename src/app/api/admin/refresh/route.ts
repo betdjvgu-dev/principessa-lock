@@ -8,7 +8,7 @@ type AdminRefreshInput = {
 };
 
 export async function POST(request: Request) {
-  const rateLimitError = enforceRateLimit({
+  const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many refresh attempts. Please wait before trying again.",
     limit: 30,
     request,

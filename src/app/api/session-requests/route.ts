@@ -22,7 +22,7 @@ function buildInsertPayload(input: SessionRequestInput, deviceId: string, subId:
 }
 
 export async function POST(request: Request) {
-  const rateLimitError = enforceRateLimit({
+  const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many session request attempts. Please wait before trying again.",
     limit: 10,
     request,

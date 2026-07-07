@@ -9,7 +9,7 @@ type AdminLoginInput = {
 };
 
 export async function POST(request: Request) {
-  const rateLimitError = enforceRateLimit({
+  const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many login attempts. Please wait before trying again.",
     limit: 10,
     request,

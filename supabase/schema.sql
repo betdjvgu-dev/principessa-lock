@@ -50,6 +50,15 @@ create table if not exists public.subs (
   constraint subs_status_check check (status in ('invited', 'active', 'archived'))
 );
 
+alter table public.subs
+  add column if not exists pending_session_days integer;
+
+alter table public.subs
+  add column if not exists pending_daily_limit_minutes integer;
+
+alter table public.subs
+  add column if not exists pending_forced_sleep_enabled boolean;
+
 create unique index if not exists subs_pairing_code_hash_key
   on public.subs (pairing_code_hash)
   where pairing_code_hash is not null;
@@ -83,6 +92,9 @@ alter table public.devices
 
 alter table public.devices
   add column if not exists device_secret_rotated_at timestamptz;
+
+alter table public.devices
+  add column if not exists fcm_token text;
 
 alter table public.devices
   add column if not exists sub_id uuid references public.subs(id) on delete cascade;
@@ -312,6 +324,15 @@ alter table if exists public.device_heartbeats
 
 alter table if exists public.device_heartbeats
   add column if not exists sub_id uuid references public.subs(id) on delete set null;
+
+alter table if exists public.device_heartbeats
+  add column if not exists root_detected boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists emulator_detected boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists debugger_attached boolean;
 
 create index if not exists device_heartbeats_received_at_idx
   on public.device_heartbeats (received_at desc);

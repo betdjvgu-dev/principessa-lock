@@ -1,5 +1,6 @@
 import { jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -25,6 +26,12 @@ function extractSubLabel(value: PendingRequestRow["subs"]) {
 }
 
 export async function GET(request: Request) {
+  const rateLimitError = await enforceAdminRateLimit(request, "session-requests:list");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {

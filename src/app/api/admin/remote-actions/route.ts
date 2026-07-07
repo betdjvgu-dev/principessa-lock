@@ -1,5 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { sendRemoteActionPush } from "@/lib/server/fcm";
+import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateRemoteActionCreateInput, type RemoteActionCreateInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -17,6 +19,12 @@ type CreatedActionRow = {
 };
 
 export async function POST(request: Request) {
+  const rateLimitError = await enforceAdminRateLimit(request, "remote-actions");
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const auth = await verifyAdminRequest(request);
 
   if (auth.error) {
@@ -73,6 +81,18 @@ export async function POST(request: Request) {
 
   if (!action) {
     return jsonError(500, "Remote action creation did not return a row.");
+  }
+
+  const targetDeviceId = validation.data.deviceId ?? session.device_id ?? null;
+
+  if (targetDeviceId) {
+    const { data: device } = await supabase
+      .from("devices")
+      .select("fcm_token")
+      .eq("id", targetDeviceId)
+      .maybeSingle<{ fcm_token: string | null }>();
+
+    await sendRemoteActionPush(device?.fcm_token);
   }
 
   return jsonOk({
