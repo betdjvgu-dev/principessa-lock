@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { requireAuthenticatedDevice, verifyRemoteActionOwnershipForDevice } from "@/lib/server/device-auth";
 import { readJsonBody, validateRemoteActionCompleteInput, type RemoteActionCompleteInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -34,6 +35,22 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const supabase = getSupabaseAdminClient();
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
+  const actionOwnership = await verifyRemoteActionOwnershipForDevice({
+    actionId: id,
+    authenticatedDeviceId: deviceAuth.device.id,
+    suppliedSupabase: supabase,
+  });
+
+  if (!actionOwnership.ok) {
+    return actionOwnership.response;
+  }
+
   const { data: action, error: loadError } = await supabase
     .from("device_remote_actions")
     .select("id, status")

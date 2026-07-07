@@ -42,11 +42,27 @@ create index if not exists session_requests_status_created_at_idx
 create table if not exists public.devices (
   id uuid primary key default gen_random_uuid(),
   device_name text not null,
+  device_secret_hash text,
+  device_secret_created_at timestamptz,
+  device_secret_rotated_at timestamptz,
   platform text not null default 'android',
   timezone text,
   last_seen_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.devices
+  add column if not exists device_secret_hash text;
+
+alter table public.devices
+  add column if not exists device_secret_created_at timestamptz;
+
+alter table public.devices
+  add column if not exists device_secret_rotated_at timestamptz;
+
+create unique index if not exists devices_device_secret_hash_key
+  on public.devices (device_secret_hash)
+  where device_secret_hash is not null;
 
 create table if not exists public.sessions (
   id uuid primary key default gen_random_uuid(),
@@ -61,6 +77,7 @@ create table if not exists public.sessions (
   starts_at timestamptz not null,
   ends_at timestamptz not null,
   status text not null default 'active',
+  config_version integer not null default 1,
   activated_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -80,6 +97,9 @@ create index if not exists sessions_device_id_idx
 create index if not exists sessions_status_idx
   on public.sessions (status, created_at desc);
 
+create index if not exists sessions_status_updated_at_idx
+  on public.sessions (status, updated_at desc);
+
 alter table public.sessions
   add column if not exists sleep_start_time text not null default '23:00';
 
@@ -88,6 +108,9 @@ alter table public.sessions
 
 alter table public.sessions
   add column if not exists updated_at timestamptz not null default now();
+
+alter table public.sessions
+  add column if not exists config_version integer not null default 1;
 
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
@@ -120,20 +143,124 @@ create table if not exists public.device_heartbeats (
   app_version text,
   session_status text,
   protection_state text,
+  protection_healthy boolean,
+  protection_health_level text,
+  protection_health_status text,
+  protection_broken_reasons jsonb not null default '[]'::jsonb,
+  service_running boolean,
+  foreground_service_running boolean,
+  active_session_present boolean,
+  accessibility_granted boolean,
+  accessibility_running boolean,
   forced_sleep_enabled boolean,
+  forced_sleep_ready boolean,
   inside_sleep_window boolean,
   usage_access_granted boolean,
   device_admin_granted boolean,
+  blocking_required boolean,
   blocking_active boolean,
+  blocking_method text,
+  overlay_permission_granted boolean,
+  overlay_ready boolean,
+  overlay_active boolean,
   used_minutes integer,
   daily_limit_minutes integer,
   remaining_minutes integer,
   limit_reached boolean,
   battery_optimization_ignored boolean,
+  last_accessibility_event_at timestamptz,
+  last_protection_tick_at timestamptz,
+  last_remote_action_check_at timestamptz,
+  last_recovery_attempt_at timestamptz,
+  last_recovery_reason text,
+  last_protection_check_at timestamptz,
+  last_session_sync_at timestamptz,
   last_usage_refresh_at timestamptz,
+  network_connected boolean,
+  polling_interval_ms integer,
+  polling_mode text,
+  remote_action_queue_length integer,
   local_date date,
   payload jsonb not null default '{}'::jsonb
 );
+
+alter table if exists public.device_heartbeats
+  add column if not exists protection_healthy boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists protection_health_level text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists protection_health_status text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists protection_broken_reasons jsonb not null default '[]'::jsonb;
+
+alter table if exists public.device_heartbeats
+  add column if not exists service_running boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists foreground_service_running boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists active_session_present boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists accessibility_granted boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists accessibility_running boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists forced_sleep_ready boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists blocking_required boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_accessibility_event_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_recovery_attempt_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_recovery_reason text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_protection_check_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_protection_tick_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_remote_action_check_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists blocking_method text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists overlay_permission_granted boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists overlay_ready boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists overlay_active boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_session_sync_at timestamptz;
+
+alter table if exists public.device_heartbeats
+  add column if not exists network_connected boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists polling_interval_ms integer;
+
+alter table if exists public.device_heartbeats
+  add column if not exists polling_mode text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists remote_action_queue_length integer;
 
 create index if not exists device_heartbeats_received_at_idx
   on public.device_heartbeats (received_at desc);

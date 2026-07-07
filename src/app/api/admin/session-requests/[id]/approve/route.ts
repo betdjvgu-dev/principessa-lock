@@ -18,6 +18,11 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
+
+  if (!id.trim()) {
+    return jsonError(400, "Session request id is required.");
+  }
+
   const supabase = getSupabaseAdminClient();
   const { data: sessionRequest, error: loadError } = await supabase
     .from("session_requests")
@@ -83,4 +88,3 @@ export async function POST(request: Request, context: RouteContext) {
     },
   });
 }
-

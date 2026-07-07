@@ -15,3 +15,20 @@ export function jsonError(status: number, error: string, details?: Record<string
   );
 }
 
+export function jsonRateLimited(error: string, retryAfterSeconds: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error,
+      details: {
+        retryAfterSeconds,
+      },
+    },
+    {
+      status: 429,
+      headers: {
+        "Retry-After": String(retryAfterSeconds),
+      },
+    },
+  );
+}

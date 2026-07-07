@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { validateSessionRequestInput, readJsonBody, type SessionRequestInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -18,6 +19,18 @@ function buildInsertPayload(input: SessionRequestInput) {
 }
 
 export async function POST(request: Request) {
+  const rateLimitError = enforceRateLimit({
+    errorMessage: "Too many session request attempts. Please wait before trying again.",
+    limit: 10,
+    request,
+    routeKey: "session-requests:create",
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const bodyResult = await readJsonBody<SessionRequestInput>(request);
 
   if (!bodyResult.ok) {
@@ -56,4 +69,3 @@ export async function POST(request: Request) {
 export function GET() {
   return jsonError(405, "Method not allowed.");
 }
-

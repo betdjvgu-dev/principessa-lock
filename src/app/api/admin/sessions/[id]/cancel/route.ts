@@ -10,6 +10,7 @@ type RouteContext = {
 };
 
 type SessionRow = {
+  config_version: number;
   id: string;
   status: string;
 };
@@ -22,10 +23,15 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
+
+  if (!id.trim()) {
+    return jsonError(400, "Session id is required.");
+  }
+
   const supabase = getSupabaseAdminClient();
   const { data: session, error: loadError } = await supabase
     .from("sessions")
-    .select("id, status")
+    .select("id, status, config_version")
     .eq("id", id)
     .maybeSingle<SessionRow>();
 
@@ -44,12 +50,13 @@ export async function POST(request: Request, context: RouteContext) {
   const { data: updatedSession, error: updateError } = await supabase
     .from("sessions")
     .update({
+      config_version: session.config_version + 1,
       ends_at: new Date().toISOString(),
       status: "revoked",
     })
     .eq("id", id)
     .eq("status", "active")
-    .select("id, status")
+    .select("id, status, config_version")
     .maybeSingle<SessionRow>();
 
   if (updateError) {

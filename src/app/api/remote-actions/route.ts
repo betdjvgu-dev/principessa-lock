@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/lib/server/device-auth";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -21,11 +22,28 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
+  const sessionOwnership = await verifySessionOwnershipForDevice({
+    authenticatedDeviceId: deviceAuth.device.id,
+    sessionId,
+    suppliedSupabase: supabase,
+  });
+
+  if (!sessionOwnership.ok) {
+    return sessionOwnership.response;
+  }
+
   const { data, error } = await supabase
     .from("device_remote_actions")
     .select("id, session_id, device_id, action_type, status, payload, requested_at")
     .eq("session_id", sessionId)
     .eq("status", "pending")
+    .or(`device_id.is.null,device_id.eq.${deviceAuth.device.id}`)
     .order("requested_at", { ascending: true })
     .returns<RemoteActionRow[]>();
 

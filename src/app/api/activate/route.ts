@@ -1,5 +1,7 @@
 import { hashActivationCode } from "@/lib/server/activation-codes";
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { generateDeviceSecret, hashDeviceSecret } from "@/lib/server/device-auth";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateActivationInput, type ActivationInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -7,6 +9,7 @@ import { type SessionRequestRow } from "@/lib/server/session-flow";
 
 type SessionRow = {
   activated_at: string;
+  config_version: number;
   daily_limit_minutes: number;
   device_id: string;
   ends_at: string;
@@ -28,6 +31,18 @@ function addDays(timestamp: Date, days: number) {
 }
 
 export async function POST(request: Request) {
+  const rateLimitError = enforceRateLimit({
+    errorMessage: "Too many activation attempts. Please wait before trying again.",
+    limit: 20,
+    request,
+    routeKey: "activation:create",
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
   const bodyResult = await readJsonBody<ActivationInput>(request);
 
   if (!bodyResult.ok) {
@@ -53,11 +68,23 @@ export async function POST(request: Request) {
   }
 
   if (!sessionRequest) {
-    return jsonError(404, "Activation code not found.");
+    return jsonError(404, "Invalid activation code.");
   }
 
   if (sessionRequest.status === "activated") {
     return jsonError(409, "Activation code has already been used.");
+  }
+
+  if (sessionRequest.status === "expired") {
+    return jsonError(410, "Activation code has expired.");
+  }
+
+  if (sessionRequest.status === "rejected") {
+    return jsonError(409, "Activation request was rejected.");
+  }
+
+  if (sessionRequest.status === "pending") {
+    return jsonError(409, "Activation code is not approved yet.");
   }
 
   if (sessionRequest.status !== "approved") {
@@ -88,10 +115,15 @@ export async function POST(request: Request) {
     return jsonError(410, "Activation code has expired.");
   }
 
+  const deviceSecret = generateDeviceSecret();
+  const deviceSecretCreatedAt = new Date().toISOString();
   const { data: device, error: deviceError } = await supabase
     .from("devices")
     .insert({
       device_name: validation.data.deviceName,
+      device_secret_created_at: deviceSecretCreatedAt,
+      device_secret_hash: hashDeviceSecret(deviceSecret),
+      device_secret_rotated_at: null,
       platform: "android",
       timezone: validation.data.timezone ?? null,
     })
@@ -122,7 +154,7 @@ export async function POST(request: Request) {
       status: "active",
       timezone: validation.data.timezone ?? null,
     })
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, activated_at, updated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
     .maybeSingle<SessionRow>();
 
   if (sessionError) {
@@ -151,6 +183,10 @@ export async function POST(request: Request) {
   }
 
   return jsonOk({
+    device: {
+      id: device.id,
+      deviceSecret,
+    },
     ok: true,
     session: {
       id: session.id,
@@ -158,6 +194,7 @@ export async function POST(request: Request) {
       sessionDays: session.session_days,
       dailyLimitMinutes: session.daily_limit_minutes,
       forcedSleepEnabled: session.forced_sleep_enabled,
+      configVersion: session.config_version,
       sleepEndTime: session.sleep_end_time,
       sleepStartTime: session.sleep_start_time,
       timezone: session.timezone,
