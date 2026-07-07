@@ -12,19 +12,31 @@ type PendingRequestRow = {
   id: string;
   requested_days: number;
   status: string;
+  sub_id: string | null;
+  subs: { label: string } | { label: string }[] | null;
 };
 
-export async function GET(request: Request) {
-  const authError = verifyAdminRequest(request);
+function extractSubLabel(value: PendingRequestRow["subs"]) {
+  if (Array.isArray(value)) {
+    return value[0]?.label ?? null;
+  }
 
-  if (authError) {
-    return authError;
+  return value?.label ?? null;
+}
+
+export async function GET(request: Request) {
+  const auth = await verifyAdminRequest(request);
+
+  if (auth.error) {
+    return auth.error;
   }
 
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_requests")
-    .select("id, device_name, requested_days, daily_limit_minutes, forced_sleep_enabled, status, created_at, approved_at")
+    .select(
+      "id, device_name, requested_days, daily_limit_minutes, forced_sleep_enabled, status, created_at, approved_at, sub_id, subs(label)",
+    )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
     .returns<PendingRequestRow[]>();
@@ -35,6 +47,17 @@ export async function GET(request: Request) {
 
   return jsonOk({
     ok: true,
-    requests: data,
+    requests: (data ?? []).map((row) => ({
+      approved_at: row.approved_at,
+      created_at: row.created_at,
+      daily_limit_minutes: row.daily_limit_minutes,
+      device_name: row.device_name,
+      forced_sleep_enabled: row.forced_sleep_enabled,
+      id: row.id,
+      requested_days: row.requested_days,
+      status: row.status,
+      sub_id: row.sub_id,
+      sub_label: extractSubLabel(row.subs),
+    })),
   });
 }

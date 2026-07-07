@@ -50,6 +50,7 @@ type HeartbeatRow = {
   session_status: string | null;
   timezone: string | null;
   remote_action_queue_length: number | null;
+  sub_id: string | null;
   usage_access_granted: boolean | null;
   used_minutes: number | null;
 };
@@ -59,17 +60,17 @@ function buildGroupKey(row: HeartbeatRow) {
 }
 
 export async function GET(request: Request) {
-  const authError = verifyAdminRequest(request);
+  const auth = await verifyAdminRequest(request);
 
-  if (authError) {
-    return authError;
+  if (auth.error) {
+    return auth.error;
   }
 
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("device_heartbeats")
     .select(
-      "id, device_id, session_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length",
+      "id, device_id, session_id, sub_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length",
     )
     .order("received_at", { ascending: false })
     .returns<HeartbeatRow[]>();
@@ -134,6 +135,7 @@ export async function GET(request: Request) {
       serviceRunning: row.service_running,
       sessionId: row.session_id,
       sessionStatus: row.session_status,
+      subId: row.sub_id,
       timezone: row.timezone,
       remoteActionQueueLength: row.remote_action_queue_length,
       usageAccessGranted: row.usage_access_granted,

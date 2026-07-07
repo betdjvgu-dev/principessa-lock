@@ -8,6 +8,7 @@ type SessionLookupRow = {
   device_id: string;
   id: string;
   status: string;
+  sub_id: string | null;
 };
 
 type CreatedActionRow = {
@@ -16,10 +17,10 @@ type CreatedActionRow = {
 };
 
 export async function POST(request: Request) {
-  const authError = verifyAdminRequest(request);
+  const auth = await verifyAdminRequest(request);
 
-  if (authError) {
-    return authError;
+  if (auth.error) {
+    return auth.error;
   }
 
   const bodyResult = await readJsonBody<RemoteActionCreateInput>(request);
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data: session, error: loadError } = await supabase
     .from("sessions")
-    .select("id, device_id, status")
+    .select("id, device_id, status, sub_id")
     .eq("id", validation.data.sessionId)
     .maybeSingle<SessionLookupRow>();
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
       payload: validation.data.payload ?? {},
       session_id: validation.data.sessionId,
       status: "pending",
+      sub_id: session.sub_id,
     })
     .select("id, status")
     .maybeSingle<CreatedActionRow>();

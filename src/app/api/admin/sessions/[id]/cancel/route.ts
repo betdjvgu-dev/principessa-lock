@@ -16,10 +16,10 @@ type SessionRow = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
-  const authError = verifyAdminRequest(request);
+  const auth = await verifyAdminRequest(request);
 
-  if (authError) {
-    return authError;
+  if (auth.error) {
+    return auth.error;
   }
 
   const { id } = await context.params;

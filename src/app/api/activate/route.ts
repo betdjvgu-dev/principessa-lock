@@ -1,6 +1,6 @@
 import { hashActivationCode } from "@/lib/server/activation-codes";
 import { jsonError, jsonOk } from "@/lib/server/api-response";
-import { generateDeviceSecret, hashDeviceSecret } from "@/lib/server/device-auth";
+import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateActivationInput, type ActivationInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -43,6 +43,12 @@ export async function POST(request: Request) {
     return rateLimitError;
   }
 
+  const deviceAuth = await requireAuthenticatedDevice(request);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
   const bodyResult = await readJsonBody<ActivationInput>(request);
 
   if (!bodyResult.ok) {
@@ -69,6 +75,10 @@ export async function POST(request: Request) {
 
   if (!sessionRequest) {
     return jsonError(404, "Invalid activation code.");
+  }
+
+  if (sessionRequest.device_id !== deviceAuth.device.id) {
+    return jsonError(403, "This activation code was not requested by this device.");
   }
 
   if (sessionRequest.status === "activated") {
@@ -115,23 +125,11 @@ export async function POST(request: Request) {
     return jsonError(410, "Activation code has expired.");
   }
 
-  const deviceSecret = generateDeviceSecret();
-  const deviceSecretCreatedAt = new Date().toISOString();
-  const { data: device, error: deviceError } = await supabase
-    .from("devices")
-    .insert({
-      device_name: validation.data.deviceName,
-      device_secret_created_at: deviceSecretCreatedAt,
-      device_secret_hash: hashDeviceSecret(deviceSecret),
-      device_secret_rotated_at: null,
-      platform: "android",
-      timezone: validation.data.timezone ?? null,
-    })
-    .select("id")
-    .single<{ id: string }>();
-
-  if (deviceError) {
-    return jsonSupabaseError("Failed to create device.", deviceError);
+  if (validation.data.timezone) {
+    await supabase
+      .from("devices")
+      .update({ timezone: validation.data.timezone })
+      .eq("id", deviceAuth.device.id);
   }
 
   const startsAt = new Date();
@@ -143,7 +141,7 @@ export async function POST(request: Request) {
     .insert({
       activated_at: activatedAt,
       daily_limit_minutes: sessionRequest.daily_limit_minutes,
-      device_id: device.id,
+      device_id: deviceAuth.device.id,
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
       request_id: sessionRequest.id,
@@ -152,6 +150,7 @@ export async function POST(request: Request) {
       sleep_start_time: "23:00",
       starts_at: startsAt.toISOString(),
       status: "active",
+      sub_id: sessionRequest.sub_id,
       timezone: validation.data.timezone ?? null,
     })
     .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
@@ -184,8 +183,7 @@ export async function POST(request: Request) {
 
   return jsonOk({
     device: {
-      id: device.id,
-      deviceSecret,
+      id: deviceAuth.device.id,
     },
     ok: true,
     session: {

@@ -102,6 +102,7 @@ export async function POST(request: Request) {
     service_running: heartbeat.serviceRunning ?? null,
     session_id: heartbeat.sessionId,
     session_status: heartbeat.sessionStatus,
+    sub_id: deviceAuth.device.subId,
     timezone: heartbeat.timezone ?? null,
     remote_action_queue_length: heartbeat.remoteActionQueueLength ?? null,
     usage_access_granted: heartbeat.usageAccessGranted ?? null,

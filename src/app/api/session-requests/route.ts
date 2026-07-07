@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { validateSessionRequestInput, readJsonBody, type SessionRequestInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -9,12 +10,14 @@ type CreateSessionRequestRow = {
   status: string;
 };
 
-function buildInsertPayload(input: SessionRequestInput) {
+function buildInsertPayload(input: SessionRequestInput, deviceId: string, subId: string | null) {
   return {
     daily_limit_minutes: input.dailyLimitMinutes,
+    device_id: deviceId,
     device_name: input.deviceName,
     forced_sleep_enabled: input.forcedSleepEnabled,
     requested_days: input.sessionDays,
+    sub_id: subId,
   };
 }
 
@@ -29,6 +32,12 @@ export async function POST(request: Request) {
 
   if (rateLimitError) {
     return rateLimitError;
+  }
+
+  const deviceAuth = await requireAuthenticatedDevice(request);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
   }
 
   const bodyResult = await readJsonBody<SessionRequestInput>(request);
@@ -46,7 +55,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_requests")
-    .insert(buildInsertPayload(validation.data))
+    .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.subId))
     .select("id, status")
     .single<CreateSessionRequestRow>();
 

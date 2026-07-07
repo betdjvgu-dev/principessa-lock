@@ -30,6 +30,8 @@ type SessionRow = {
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  sub_id: string | null;
+  sub_label: string | null;
   timezone: string | null;
   updated_at: string;
 };
@@ -49,6 +51,8 @@ type RawSessionRow = {
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  sub_id: string | null;
+  subs: { label: string } | { label: string }[] | null;
   timezone: string | null;
   updated_at: string;
 };
@@ -61,18 +65,26 @@ function extractDeviceName(value: RawSessionRow["devices"]) {
   return value?.device_name ?? null;
 }
 
-export async function GET(request: Request) {
-  const authError = verifyAdminRequest(request);
+function extractSubLabel(value: RawSessionRow["subs"]) {
+  if (Array.isArray(value)) {
+    return value[0]?.label ?? null;
+  }
 
-  if (authError) {
-    return authError;
+  return value?.label ?? null;
+}
+
+export async function GET(request: Request) {
+  const auth = await verifyAdminRequest(request);
+
+  if (auth.error) {
+    return auth.error;
   }
 
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, devices(device_name)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, devices(device_name), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -97,6 +109,8 @@ export async function GET(request: Request) {
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,
     status: session.status,
+    sub_id: session.sub_id,
+    sub_label: extractSubLabel(session.subs),
     timezone: session.timezone,
     updated_at: session.updated_at,
   }));

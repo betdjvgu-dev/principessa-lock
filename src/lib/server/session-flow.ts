@@ -9,12 +9,15 @@ export type SessionRequestRow = {
   approved_at: string | null;
   created_at: string;
   daily_limit_minutes: number;
+  device_id: string | null;
   device_name: string;
   forced_sleep_enabled: boolean;
   id: string;
+  payment_note: string | null;
   rejected_at: string | null;
   requested_days: number;
   status: "pending" | "approved" | "rejected" | "activated" | "expired";
+  sub_id: string | null;
   updated_at: string;
 };
 

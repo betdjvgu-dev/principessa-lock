@@ -93,10 +93,10 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const authError = verifyAdminRequest(request);
+  const auth = await verifyAdminRequest(request);
 
-  if (authError) {
-    return authError;
+  if (auth.error) {
+    return auth.error;
   }
 
   const bodyResult = await readJsonBody<AdminSessionUpdateInput>(request);

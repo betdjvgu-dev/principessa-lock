@@ -27,3 +27,15 @@ export function generateActivationCode() {
   return `PRIN-${randomCharacters(LETTERS, 4)}-${randomCharacters(DIGITS, 4)}`;
 }
 
+export function normalizePairingCode(pairingCode: string) {
+  return pairingCode.trim().toUpperCase();
+}
+
+export function hashPairingCode(pairingCode: string) {
+  return createHash("sha256").update(normalizePairingCode(pairingCode)).digest("hex");
+}
+
+export function generatePairingCode() {
+  return `PAIR-${randomCharacters(LETTERS, 4)}-${randomCharacters(DIGITS, 4)}`;
+}
+

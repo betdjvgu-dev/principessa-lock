@@ -39,6 +39,30 @@ create unique index if not exists session_requests_activation_code_hash_key
 create index if not exists session_requests_status_created_at_idx
   on public.session_requests (status, created_at desc);
 
+create table if not exists public.subs (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,
+  status text not null default 'invited',
+  pairing_code_hash text,
+  pairing_code_expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint subs_status_check check (status in ('invited', 'active', 'archived'))
+);
+
+create unique index if not exists subs_pairing_code_hash_key
+  on public.subs (pairing_code_hash)
+  where pairing_code_hash is not null;
+
+create index if not exists subs_status_created_at_idx
+  on public.subs (status, created_at desc);
+
+drop trigger if exists set_subs_updated_at on public.subs;
+create trigger set_subs_updated_at
+before update on public.subs
+for each row
+execute function public.set_updated_at();
+
 create table if not exists public.devices (
   id uuid primary key default gen_random_uuid(),
   device_name text not null,
@@ -60,9 +84,27 @@ alter table public.devices
 alter table public.devices
   add column if not exists device_secret_rotated_at timestamptz;
 
+alter table public.devices
+  add column if not exists sub_id uuid references public.subs(id) on delete cascade;
+
 create unique index if not exists devices_device_secret_hash_key
   on public.devices (device_secret_hash)
   where device_secret_hash is not null;
+
+create index if not exists devices_sub_id_idx
+  on public.devices (sub_id);
+
+alter table public.session_requests
+  add column if not exists sub_id uuid references public.subs(id) on delete cascade;
+
+alter table public.session_requests
+  add column if not exists device_id uuid references public.devices(id) on delete cascade;
+
+alter table public.session_requests
+  add column if not exists payment_note text;
+
+create index if not exists session_requests_sub_id_idx
+  on public.session_requests (sub_id, created_at desc);
 
 create table if not exists public.sessions (
   id uuid primary key default gen_random_uuid(),
@@ -111,6 +153,12 @@ alter table public.sessions
 
 alter table public.sessions
   add column if not exists config_version integer not null default 1;
+
+alter table public.sessions
+  add column if not exists sub_id uuid references public.subs(id) on delete cascade;
+
+create index if not exists sessions_sub_id_idx
+  on public.sessions (sub_id, created_at desc);
 
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
@@ -262,6 +310,9 @@ alter table if exists public.device_heartbeats
 alter table if exists public.device_heartbeats
   add column if not exists remote_action_queue_length integer;
 
+alter table if exists public.device_heartbeats
+  add column if not exists sub_id uuid references public.subs(id) on delete set null;
+
 create index if not exists device_heartbeats_received_at_idx
   on public.device_heartbeats (received_at desc);
 
@@ -271,10 +322,14 @@ create index if not exists device_heartbeats_session_id_received_at_idx
 create index if not exists device_heartbeats_device_id_received_at_idx
   on public.device_heartbeats (device_id, received_at desc);
 
+create index if not exists device_heartbeats_sub_id_received_at_idx
+  on public.device_heartbeats (sub_id, received_at desc);
+
 create table if not exists public.device_remote_actions (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
   device_id uuid references public.devices(id) on delete set null,
+  sub_id uuid references public.subs(id) on delete set null,
   action_type text not null,
   status text not null default 'pending',
   payload jsonb not null default '{}'::jsonb,
@@ -289,11 +344,24 @@ create table if not exists public.device_remote_actions (
     check (action_type in ('force_lock', 'clear_local_usage', 'sync_config'))
 );
 
+alter table public.device_remote_actions
+  add column if not exists sub_id uuid references public.subs(id) on delete set null;
+
+alter table public.device_remote_actions
+  drop constraint if exists device_remote_actions_action_type_check;
+
+alter table public.device_remote_actions
+  add constraint device_remote_actions_action_type_check
+  check (action_type in ('force_lock', 'clear_local_usage', 'sync_config', 'capture_screenshot'));
+
 create index if not exists device_remote_actions_session_status_requested_idx
   on public.device_remote_actions (session_id, status, requested_at asc);
 
 create index if not exists device_remote_actions_device_status_requested_idx
   on public.device_remote_actions (device_id, status, requested_at asc);
+
+create index if not exists device_remote_actions_sub_id_requested_idx
+  on public.device_remote_actions (sub_id, status, requested_at asc);
 
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at

@@ -11,6 +11,7 @@ type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 type DeviceAuthRow = {
   device_secret_hash: string | null;
   id: string;
+  sub_id: string | null;
 };
 
 type SessionOwnershipRow = {
@@ -28,6 +29,7 @@ type DeviceAuthSuccess = {
   ok: true;
   device: {
     id: string;
+    subId: string | null;
   };
 };
 
@@ -74,7 +76,7 @@ export async function requireAuthenticatedDevice(
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
   const { data: device, error } = await supabase
     .from("devices")
-    .select("id, device_secret_hash")
+    .select("id, device_secret_hash, sub_id")
     .eq("device_secret_hash", hashDeviceSecret(deviceSecret))
     .maybeSingle<DeviceAuthRow>();
 
@@ -96,6 +98,7 @@ export async function requireAuthenticatedDevice(
     ok: true,
     device: {
       id: device.id,
+      subId: device.sub_id,
     },
   };
 }
