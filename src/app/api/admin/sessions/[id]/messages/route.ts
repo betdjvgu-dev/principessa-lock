@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { sendNewMessagePush } from "@/lib/server/fcm";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateSessionMessageInput, type SessionMessageInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -102,9 +103,9 @@ export async function POST(request: Request, context: RouteContext) {
   const supabase = getSupabaseAdminClient();
   const { data: session, error: loadError } = await supabase
     .from("sessions")
-    .select("id, sub_id")
+    .select("id, device_id, sub_id")
     .eq("id", id)
-    .maybeSingle<{ id: string; sub_id: string | null }>();
+    .maybeSingle<{ id: string; device_id: string | null; sub_id: string | null }>();
 
   if (loadError) {
     return jsonSupabaseError("Failed to load session.", loadError);
@@ -131,6 +132,19 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (!message) {
     return jsonError(500, "Message was not created.");
+  }
+
+  // Awaited (not fire-and-forget) since a serverless function isn't guaranteed to keep running
+  // background work after it returns a response. Without this, a keyholder message only ever
+  // reached the sub whenever they happened to open the Messaging screen on their own.
+  if (session.device_id) {
+    const { data: device } = await supabase
+      .from("devices")
+      .select("fcm_token")
+      .eq("id", session.device_id)
+      .maybeSingle<{ fcm_token: string | null }>();
+
+    await sendNewMessagePush(device?.fcm_token);
   }
 
   return jsonOk(

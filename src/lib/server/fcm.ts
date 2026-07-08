@@ -32,12 +32,12 @@ function getFirebaseMessaging() {
 }
 
 /**
- * Best-effort: wakes a device to check for pending remote actions immediately instead of
- * waiting for the next poll interval. If Firebase isn't configured, or the device has no
- * token (never registered, or a prior push failed), this silently no-ops -- polling always
- * remains the fallback delivery path regardless of push success.
+ * Best-effort: wakes a device via a data-only push instead of waiting for the next poll
+ * interval. If Firebase isn't configured, or the device has no token (never registered, or a
+ * prior push failed), this silently no-ops -- polling always remains the fallback delivery
+ * path regardless of push success.
  */
-export async function sendRemoteActionPush(fcmToken: string | null | undefined) {
+async function sendDataPush(fcmToken: string | null | undefined, data: Record<string, string>) {
   if (!fcmToken) {
     return;
   }
@@ -51,10 +51,22 @@ export async function sendRemoteActionPush(fcmToken: string | null | undefined) 
   try {
     await messaging.send({
       android: { priority: "high" },
-      data: { type: "remote_action" },
+      data,
       token: fcmToken,
     });
   } catch (error) {
-    console.error("Failed to send FCM remote-action push.", error);
+    console.error("Failed to send FCM push.", error);
   }
+}
+
+/** Wakes a device to check for pending remote actions immediately (e.g. force_lock). */
+export async function sendRemoteActionPush(fcmToken: string | null | undefined) {
+  await sendDataPush(fcmToken, { type: "remote_action" });
+}
+
+/** Wakes a device to check for (and notify) a new message from Principessa immediately --
+ *  without this, a keyholder message only ever reached the sub once they happened to open
+ *  the Messaging screen on their own. */
+export async function sendNewMessagePush(fcmToken: string | null | undefined) {
+  await sendDataPush(fcmToken, { type: "new_message" });
 }
