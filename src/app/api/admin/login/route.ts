@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
-import { getServerEnv } from "@/lib/env";
+import { getServerEnv, getSupabaseAnonKey } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -52,8 +52,6 @@ export async function POST(request: Request) {
   // without a valid Supabase Auth JWT, and Row Level Security on the realtime-eligible tables
   // is what actually gates what this admin session can read. This lets the desktop admin open
   // its own Supabase Realtime connection instead of relying purely on backend REST polling.
-  const env = getServerEnv();
-
   return jsonOk({
     ok: true,
     session: {
@@ -62,8 +60,8 @@ export async function POST(request: Request) {
       expiresAt: data.session.expires_at ?? null,
     },
     supabase: {
-      anonKey: env.SUPABASE_ANON_KEY,
-      url: env.SUPABASE_URL,
+      anonKey: getSupabaseAnonKey(),
+      url: getServerEnv().SUPABASE_URL,
     },
   });
 }
