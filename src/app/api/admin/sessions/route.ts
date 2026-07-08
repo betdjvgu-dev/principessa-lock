@@ -34,8 +34,11 @@ type SessionRow = {
   device_id: string;
   device_name: string | null;
   device_location: DeviceLocation;
+  recent_dns_queries: RawDnsQueryEntry[];
+  installed_apps: RawInstalledApp[];
   ends_at: string;
   forced_sleep_enabled: boolean;
+  gallery_access_enabled: boolean;
   id: string;
   request_id: string;
   session_days: number;
@@ -43,10 +46,24 @@ type SessionRow = {
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  step_reward_bonus_minutes: number;
+  step_reward_enabled: boolean;
+  step_reward_steps_required: number;
   sub_id: string | null;
   sub_label: string | null;
   timezone: string | null;
   updated_at: string;
+};
+
+type RawDnsQueryEntry = {
+  blocked: boolean;
+  domain: string;
+  queriedAt: string;
+};
+
+type RawInstalledApp = {
+  appName: string;
+  packageName: string;
 };
 
 type RawDevice = {
@@ -55,6 +72,8 @@ type RawDevice = {
   last_longitude: number | null;
   last_location_accuracy_m: number | null;
   last_location_at: string | null;
+  recent_dns_queries: RawDnsQueryEntry[] | null;
+  installed_apps: RawInstalledApp[] | null;
 };
 
 type RawSessionRow = {
@@ -69,6 +88,7 @@ type RawSessionRow = {
   devices: RawDevice | RawDevice[] | null;
   ends_at: string;
   forced_sleep_enabled: boolean;
+  gallery_access_enabled: boolean;
   id: string;
   request_id: string;
   session_days: number;
@@ -76,6 +96,9 @@ type RawSessionRow = {
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  step_reward_bonus_minutes: number;
+  step_reward_enabled: boolean;
+  step_reward_steps_required: number;
   sub_id: string | null;
   subs: { label: string } | { label: string }[] | null;
   timezone: string | null;
@@ -109,6 +132,14 @@ function extractDeviceLocation(value: RawSessionRow["devices"]): DeviceLocation 
   };
 }
 
+function extractRecentDnsQueries(value: RawSessionRow["devices"]): RawDnsQueryEntry[] {
+  return extractDevice(value)?.recent_dns_queries ?? [];
+}
+
+function extractInstalledApps(value: RawSessionRow["devices"]): RawInstalledApp[] {
+  return extractDevice(value)?.installed_apps ?? [];
+}
+
 function extractSubLabel(value: RawSessionRow["subs"]) {
   if (Array.isArray(value)) {
     return value[0]?.label ?? null;
@@ -134,7 +165,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -155,8 +186,11 @@ export async function GET(request: Request) {
     device_id: session.device_id,
     device_name: extractDeviceName(session.devices),
     device_location: extractDeviceLocation(session.devices),
+    recent_dns_queries: extractRecentDnsQueries(session.devices),
+    installed_apps: extractInstalledApps(session.devices),
     ends_at: session.ends_at,
     forced_sleep_enabled: session.forced_sleep_enabled,
+    gallery_access_enabled: session.gallery_access_enabled,
     id: session.id,
     request_id: session.request_id,
     session_days: session.session_days,
@@ -164,6 +198,9 @@ export async function GET(request: Request) {
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,
     status: session.status,
+    step_reward_bonus_minutes: session.step_reward_bonus_minutes,
+    step_reward_enabled: session.step_reward_enabled,
+    step_reward_steps_required: session.step_reward_steps_required,
     sub_id: session.sub_id,
     sub_label: extractSubLabel(session.subs),
     timezone: session.timezone,
@@ -201,6 +238,24 @@ export async function GET(request: Request) {
     latestHeartbeatBySession.set(row.session_id, row);
   }
 
+  const { data: unreadMessageRows, error: unreadMessageError } = await supabase
+    .from("session_messages")
+    .select("session_id")
+    .in("session_id", sessionIds)
+    .eq("sender", "sub")
+    .is("read_at", null);
+
+  if (unreadMessageError) {
+    return jsonSupabaseError("Failed to load unread message counts.", unreadMessageError);
+  }
+
+  const unreadMessageCountBySession = new Map<string, number>();
+
+  for (const row of unreadMessageRows ?? []) {
+    const sessionId = (row as { session_id: string }).session_id;
+    unreadMessageCountBySession.set(sessionId, (unreadMessageCountBySession.get(sessionId) ?? 0) + 1);
+  }
+
   return jsonOk({
     ok: true,
     sessions: sessions.map((session) => {
@@ -208,6 +263,7 @@ export async function GET(request: Request) {
 
       return {
         ...session,
+        unread_message_count: unreadMessageCountBySession.get(session.id) ?? 0,
         latest_heartbeat: latestHeartbeat
           ? {
               blocking_active: latestHeartbeat.blocking_active,

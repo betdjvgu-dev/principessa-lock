@@ -70,6 +70,10 @@ function pruneExpiredBuckets(store: Map<string, RateLimitBucket>, now: number) {
 
 let cachedRedis: Redis | null | undefined;
 
+function isProductionEnvironment() {
+  return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+}
+
 function getUpstashRedis(): Redis | null {
   if (cachedRedis !== undefined) {
     return cachedRedis;
@@ -78,7 +82,22 @@ function getUpstashRedis(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-  cachedRedis = url && token ? new Redis({ token, url }) : null;
+  if (!url || !token) {
+    if (isProductionEnvironment()) {
+      // The in-memory fallback below is per-serverless-instance only, so on a real
+      // multi-instance production deployment it doesn't actually rate-limit anything across
+      // instances -- fail loudly here rather than silently running with no effective
+      // protection. Local/dev (no VERCEL_ENV, NODE_ENV !== "production") still falls back.
+      throw new Error(
+        "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set in production -- the in-memory rate limit fallback does not work across multiple serverless instances.",
+      );
+    }
+
+    cachedRedis = null;
+    return cachedRedis;
+  }
+
+  cachedRedis = new Redis({ token, url });
   return cachedRedis;
 }
 
@@ -97,7 +116,8 @@ function getRateLimiterCache() {
 /**
  * Returns an Upstash-backed limiter (shared across serverless instances/regions) when
  * `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` are configured, otherwise `null` so
- * callers fall back to the in-memory, per-instance-only limiter (fine for local dev).
+ * callers fall back to the in-memory, per-instance-only limiter (fine for local dev, but
+ * throws instead in a production environment -- see getUpstashRedis).
  */
 function getUpstashLimiter(limit: number, windowMs: number): Ratelimit | null {
   const redis = getUpstashRedis();

@@ -1,0 +1,74 @@
+import { jsonOk } from "@/lib/server/api-response";
+import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
+import { readJsonBody, validateDnsQueryLogInput, type DnsQueryLogInput } from "@/lib/server/request-validation";
+import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+
+const MAX_STORED_ENTRIES = 50;
+
+type StoredDnsQueryEntry = {
+  blocked: boolean;
+  domain: string;
+  queriedAt: string;
+};
+
+export async function POST(request: Request) {
+  const rateLimitError = await enforceRateLimit({
+    errorMessage: "Too many DNS log reports. Please wait before trying again.",
+    limit: 30,
+    request,
+    routeKey: "devices:dns-log",
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  const bodyResult = await readJsonBody<DnsQueryLogInput>(request);
+
+  if (!bodyResult.ok) {
+    return bodyResult.response;
+  }
+
+  const validation = validateDnsQueryLogInput(bodyResult.data);
+
+  if (!validation.ok) {
+    return validation.response;
+  }
+
+  if (validation.data.queries.length === 0) {
+    return jsonOk({ ok: true });
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
+  const { data: existingDevice, error: loadError } = await supabase
+    .from("devices")
+    .select("recent_dns_queries")
+    .eq("id", deviceAuth.device.id)
+    .maybeSingle<{ recent_dns_queries: StoredDnsQueryEntry[] | null }>();
+
+  if (loadError) {
+    return jsonSupabaseError("Failed to load existing DNS query log.", loadError);
+  }
+
+  const merged = [...(existingDevice?.recent_dns_queries ?? []), ...validation.data.queries].slice(-MAX_STORED_ENTRIES);
+
+  const { error: updateError } = await supabase
+    .from("devices")
+    .update({ recent_dns_queries: merged })
+    .eq("id", deviceAuth.device.id);
+
+  if (updateError) {
+    return jsonSupabaseError("Failed to store DNS query log.", updateError);
+  }
+
+  return jsonOk({ ok: true });
+}

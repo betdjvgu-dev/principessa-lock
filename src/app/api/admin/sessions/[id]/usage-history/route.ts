@@ -13,6 +13,9 @@ type RouteContext = {
 type UsageRow = {
   limit_minutes: number;
   local_date: string;
+  per_app_minutes: Record<string, number> | null;
+  step_bonus_minutes_earned: number | null;
+  steps_recorded: number | null;
   used_minutes: number;
 };
 
@@ -38,7 +41,7 @@ export async function GET(request: Request, context: RouteContext) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_daily_usage")
-    .select("local_date, used_minutes, limit_minutes")
+    .select("local_date, used_minutes, limit_minutes, steps_recorded, step_bonus_minutes_earned, per_app_minutes")
     .eq("session_id", id)
     .order("local_date", { ascending: false })
     .limit(30)
@@ -52,6 +55,9 @@ export async function GET(request: Request, context: RouteContext) {
     days: (data ?? []).map((row) => ({
       dailyLimitMinutes: row.limit_minutes,
       localDate: row.local_date,
+      perAppMinutes: row.per_app_minutes ?? {},
+      stepBonusMinutesEarned: row.step_bonus_minutes_earned,
+      stepsRecorded: row.steps_recorded,
       usedMinutes: row.used_minutes,
     })),
     ok: true,

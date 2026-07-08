@@ -32,6 +32,18 @@ create table if not exists public.session_requests (
     check (daily_limit_minutes between 5 and 90)
 );
 
+-- Opt-in, paid add-on chosen by the sub at request time (see pricing.ts/SessionPricing.kt
+-- for the surcharge) -- on-demand only, no automatic scanning/classification of photos.
+alter table public.session_requests
+  add column if not exists gallery_access_enabled boolean not null default false;
+
+-- "Leave it entirely up to Principessa" request mode: the sub skips specifying terms (the
+-- columns above still get a placeholder value to satisfy the not-null/check constraints) and
+-- the keyholder sets the real daily_limit_minutes/requested_days/forced_sleep_enabled/
+-- gallery_access_enabled freely at approval time instead of just accepting what was asked for.
+alter table public.session_requests
+  add column if not exists full_discretion boolean not null default false;
+
 create unique index if not exists session_requests_activation_code_hash_key
   on public.session_requests (activation_code_hash)
   where activation_code_hash is not null;
@@ -49,6 +61,15 @@ create table if not exists public.subs (
   updated_at timestamptz not null default now(),
   constraint subs_status_check check (status in ('invited', 'active', 'archived'))
 );
+
+-- Chosen once by the sub at first pairing (never re-asked); used for the in-app leaderboard,
+-- ranked by the sum of that sub's activated sessions' price_usd (see sessions.price_usd below).
+alter table public.subs
+  add column if not exists username text;
+
+create unique index if not exists subs_username_lower_key
+  on public.subs (lower(username))
+  where username is not null;
 
 alter table public.subs
   add column if not exists pending_session_days integer;
@@ -113,6 +134,18 @@ alter table public.devices
 alter table public.devices
   add column if not exists last_location_at timestamptz;
 
+-- Rolling log (capped, FIFO-trimmed client-side and again on write) of DNS lookups the
+-- content filter observed -- hostnames only, meant to help the keyholder tune the
+-- blocklist, not a full browsing history.
+alter table public.devices
+  add column if not exists recent_dns_queries jsonb not null default '[]'::jsonb;
+
+-- Full snapshot of user-visible installed apps (package name + label), overwritten on each
+-- report -- lets the keyholder pick apps to block from a list instead of typing package
+-- names blind.
+alter table public.devices
+  add column if not exists installed_apps jsonb not null default '[]'::jsonb;
+
 create unique index if not exists devices_device_secret_hash_key
   on public.devices (device_secret_hash)
   where device_secret_hash is not null;
@@ -126,8 +159,10 @@ alter table public.session_requests
 alter table public.session_requests
   add column if not exists device_id uuid references public.devices(id) on delete cascade;
 
+-- payment_note was added for a manual Throne-payment reference note but was never wired into
+-- any route or UI; dropped rather than left as a dead, unpopulated column.
 alter table public.session_requests
-  add column if not exists payment_note text;
+  drop column if exists payment_note;
 
 create index if not exists session_requests_sub_id_idx
   on public.session_requests (sub_id, created_at desc);
@@ -207,6 +242,29 @@ alter table public.sessions
 alter table public.sessions
   add column if not exists blocked_domains jsonb not null default '[]'::jsonb;
 
+-- Step-count reward: reaching step_reward_steps_required steps in a local day grants a
+-- one-time step_reward_bonus_minutes bonus added to that day's effective limit (device-side
+-- only, tracked per session_daily_usage row below) -- not a per-1000-steps repeating bonus.
+alter table public.sessions
+  add column if not exists step_reward_enabled boolean not null default false;
+
+alter table public.sessions
+  add column if not exists step_reward_steps_required integer not null default 5000;
+
+alter table public.sessions
+  add column if not exists step_reward_bonus_minutes integer not null default 20;
+
+-- Opt-in, paid gallery access -- on-demand viewing only (a remote "capture_gallery" action
+-- returns the most recent photos), never automatic scanning/classification.
+alter table public.sessions
+  add column if not exists gallery_access_enabled boolean not null default false;
+
+-- Computed server-side once at pair/activate time using the same formula as
+-- session-pricing.ts (mirrored in Android/desktop for display) -- the source of truth for the
+-- leaderboard's tribute totals, since the client-computed estimate isn't trustworthy for ranking.
+alter table public.sessions
+  add column if not exists price_usd integer not null default 0;
+
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
@@ -224,8 +282,65 @@ create table if not exists public.session_daily_usage (
     unique (session_id, local_date)
 );
 
+alter table public.session_daily_usage
+  add column if not exists steps_recorded integer;
+
+alter table public.session_daily_usage
+  add column if not exists step_bonus_minutes_earned integer not null default 0;
+
+-- Per-app foreground minutes for that local day, e.g. {"com.instagram.android": 42}. Reported
+-- alongside the existing total used_minutes; a top-N summary for the admin UI, not a full log.
+alter table public.session_daily_usage
+  add column if not exists per_app_minutes jsonb not null default '{}'::jsonb;
+
 create index if not exists session_daily_usage_session_id_idx
   on public.session_daily_usage (session_id, local_date desc);
+
+-- Two-way sub<->keyholder messaging, scoped to a session. Kept intentionally simple (no
+-- attachments, no threads) -- this is a "ask your keyholder something" channel, most
+-- importantly reachable from the block screen when the daily limit is reached.
+create table if not exists public.session_messages (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  sub_id uuid references public.subs(id) on delete set null,
+  sender text not null,
+  body text not null,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  constraint session_messages_sender_check check (sender in ('sub', 'admin')),
+  constraint session_messages_body_check check (char_length(body) between 1 and 1000)
+);
+
+create index if not exists session_messages_session_id_idx
+  on public.session_messages (session_id, created_at desc);
+
+-- Paid, time-boxed exception to a session's blocked_packages list -- only offered for
+-- sessions long enough (session_days >= 7, enforced in the route, not here) for a one-off
+-- app unlock to make sense. Fixed $5/app, fixed 24h from approval; the keyholder approves
+-- manually after confirming payment via Throne (no in-app payment integration).
+create table if not exists public.app_unlock_requests (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  device_id uuid not null references public.devices(id) on delete cascade,
+  sub_id uuid references public.subs(id) on delete set null,
+  package_name text not null,
+  status text not null default 'pending',
+  price_usd integer not null default 5,
+  requested_at timestamptz not null default now(),
+  approved_at timestamptz,
+  rejected_at timestamptz,
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint app_unlock_requests_status_check
+    check (status in ('pending', 'approved', 'rejected'))
+);
+
+create index if not exists app_unlock_requests_session_id_idx
+  on public.app_unlock_requests (session_id, created_at desc);
+
+create index if not exists app_unlock_requests_status_idx
+  on public.app_unlock_requests (status, created_at desc);
 
 create table if not exists public.device_heartbeats (
   id uuid primary key default gen_random_uuid(),
@@ -258,6 +373,8 @@ create table if not exists public.device_heartbeats (
   overlay_permission_granted boolean,
   overlay_ready boolean,
   overlay_active boolean,
+  notification_access_granted boolean,
+  autostart_acknowledged boolean,
   used_minutes integer,
   daily_limit_minutes integer,
   remaining_minutes integer,
@@ -343,6 +460,12 @@ alter table if exists public.device_heartbeats
   add column if not exists overlay_active boolean;
 
 alter table if exists public.device_heartbeats
+  add column if not exists notification_access_granted boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists autostart_acknowledged boolean;
+
+alter table if exists public.device_heartbeats
   add column if not exists last_session_sync_at timestamptz;
 
 alter table if exists public.device_heartbeats
@@ -368,6 +491,12 @@ alter table if exists public.device_heartbeats
 
 alter table if exists public.device_heartbeats
   add column if not exists debugger_attached boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists inside_persistence_penalty boolean;
+
+alter table if exists public.device_heartbeats
+  add column if not exists persistence_penalty_until timestamptz;
 
 create index if not exists device_heartbeats_received_at_idx
   on public.device_heartbeats (received_at desc);
@@ -408,7 +537,7 @@ alter table public.device_remote_actions
 
 alter table public.device_remote_actions
   add constraint device_remote_actions_action_type_check
-  check (action_type in ('force_lock', 'clear_local_usage', 'sync_config', 'capture_screenshot'));
+  check (action_type in ('force_lock', 'clear_local_usage', 'sync_config', 'capture_screenshot', 'set_wallpaper', 'capture_gallery'));
 
 create index if not exists device_remote_actions_session_status_requested_idx
   on public.device_remote_actions (session_id, status, requested_at asc);

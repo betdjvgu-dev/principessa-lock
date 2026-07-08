@@ -4,22 +4,23 @@ import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
-type PendingRequestRow = {
+type PendingUnlockRequestRow = {
   approved_at: string | null;
   created_at: string;
-  daily_limit_minutes: number;
-  device_name: string;
-  forced_sleep_enabled: boolean;
-  full_discretion: boolean;
-  gallery_access_enabled: boolean;
+  device_id: string;
+  expires_at: string | null;
   id: string;
-  requested_days: number;
+  package_name: string;
+  price_usd: number;
+  rejected_at: string | null;
+  requested_at: string;
+  session_id: string;
   status: string;
   sub_id: string | null;
   subs: { label: string } | { label: string }[] | null;
 };
 
-function extractSubLabel(value: PendingRequestRow["subs"]) {
+function extractSubLabel(value: PendingUnlockRequestRow["subs"]) {
   if (Array.isArray(value)) {
     return value[0]?.label ?? null;
   }
@@ -28,7 +29,7 @@ function extractSubLabel(value: PendingRequestRow["subs"]) {
 }
 
 export async function GET(request: Request) {
-  const rateLimitError = await enforceAdminRateLimit(request, "session-requests:list");
+  const rateLimitError = await enforceAdminRateLimit(request, "unlock-requests:list");
 
   if (rateLimitError) {
     return rateLimitError;
@@ -42,33 +43,34 @@ export async function GET(request: Request) {
 
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
-    .from("session_requests")
+    .from("app_unlock_requests")
     .select(
-      "id, device_name, requested_days, daily_limit_minutes, forced_sleep_enabled, full_discretion, gallery_access_enabled, status, created_at, approved_at, sub_id, subs(label)",
+      "id, session_id, device_id, sub_id, package_name, status, price_usd, requested_at, approved_at, rejected_at, expires_at, created_at, subs(label)",
     )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
-    .returns<PendingRequestRow[]>();
+    .returns<PendingUnlockRequestRow[]>();
 
   if (error) {
-    return jsonSupabaseError("Failed to load pending session requests.", error);
+    return jsonSupabaseError("Failed to load pending unlock requests.", error);
   }
 
   return jsonOk({
     ok: true,
     requests: (data ?? []).map((row) => ({
-      approved_at: row.approved_at,
-      created_at: row.created_at,
-      daily_limit_minutes: row.daily_limit_minutes,
-      device_name: row.device_name,
-      forced_sleep_enabled: row.forced_sleep_enabled,
-      full_discretion: row.full_discretion,
-      gallery_access_enabled: row.gallery_access_enabled,
+      approvedAt: row.approved_at,
+      createdAt: row.created_at,
+      deviceId: row.device_id,
+      expiresAt: row.expires_at,
       id: row.id,
-      requested_days: row.requested_days,
+      packageName: row.package_name,
+      priceUsd: row.price_usd,
+      rejectedAt: row.rejected_at,
+      requestedAt: row.requested_at,
+      sessionId: row.session_id,
       status: row.status,
-      sub_id: row.sub_id,
-      sub_label: extractSubLabel(row.subs),
+      subId: row.sub_id,
+      subLabel: extractSubLabel(row.subs),
     })),
   });
 }

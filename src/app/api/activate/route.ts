@@ -3,6 +3,7 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateActivationInput, type ActivationInput } from "@/lib/server/request-validation";
+import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
@@ -14,6 +15,7 @@ type SessionRow = {
   device_id: string;
   ends_at: string;
   forced_sleep_enabled: boolean;
+  gallery_access_enabled: boolean;
   id: string;
   session_days: number;
   sleep_end_time: string;
@@ -144,6 +146,12 @@ export async function POST(request: Request) {
       device_id: deviceAuth.device.id,
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
+      gallery_access_enabled: sessionRequest.gallery_access_enabled,
+      price_usd: calculateSessionPriceUsd(
+        sessionRequest.requested_days,
+        sessionRequest.daily_limit_minutes,
+        sessionRequest.gallery_access_enabled,
+      ),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
       sleep_end_time: "07:00",
@@ -153,7 +161,7 @@ export async function POST(request: Request) {
       sub_id: sessionRequest.sub_id,
       timezone: validation.data.timezone ?? null,
     })
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
     .maybeSingle<SessionRow>();
 
   if (sessionError) {

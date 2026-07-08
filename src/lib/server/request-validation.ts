@@ -4,7 +4,16 @@ export type SessionRequestInput = {
   dailyLimitMinutes: number;
   deviceName: string;
   forcedSleepEnabled: boolean;
+  fullDiscretion: boolean;
+  galleryAccessEnabled: boolean;
   sessionDays: number;
+};
+
+export type ApproveSessionRequestInput = {
+  dailyLimitMinutes?: number;
+  forcedSleepEnabled?: boolean;
+  galleryAccessEnabled?: boolean;
+  sessionDays?: number;
 };
 
 export type ActivationInput = {
@@ -23,6 +32,7 @@ export type PairInput = {
   deviceName: string;
   pairingCode: string;
   timezone?: string;
+  username?: string;
 };
 
 export type FcmTokenInput = {
@@ -35,10 +45,42 @@ export type DeviceLocationInput = {
   longitude: number;
 };
 
+export type DnsQueryLogEntryInput = {
+  blocked: boolean;
+  domain: string;
+  queriedAt: string;
+};
+
+export type DnsQueryLogInput = {
+  queries: DnsQueryLogEntryInput[];
+};
+
+export type SessionMessageInput = {
+  body: string;
+};
+
+export type AppUnlockRequestInput = {
+  packageName: string;
+};
+
+export type InstalledAppEntryInput = {
+  appName: string;
+  packageName: string;
+};
+
+export type InstalledAppsReportInput = {
+  apps: InstalledAppEntryInput[];
+};
+
+export type SettingsPinInput = {
+  pin: string;
+};
+
 export type HeartbeatInput = {
   accessibilityGranted?: boolean;
   accessibilityRunning?: boolean;
   activeSessionPresent?: boolean;
+  autostartAcknowledged?: boolean;
   batteryOptimizationIgnored?: boolean;
   blockingActive?: boolean;
   blockingMethod?: string;
@@ -52,6 +94,8 @@ export type HeartbeatInput = {
   forcedSleepEnabled?: boolean;
   forcedSleepReady?: boolean;
   insideSleepWindow?: boolean;
+  insidePersistencePenalty?: boolean;
+  persistencePenaltyUntil?: string;
   lastAccessibilityEventAt?: string;
   lastProtectionTickAt?: string;
   lastRemoteActionCheckAt?: string;
@@ -63,6 +107,7 @@ export type HeartbeatInput = {
   limitReached?: boolean;
   localDate?: string;
   networkConnected?: boolean;
+  notificationAccessGranted?: boolean;
   overlayActive?: boolean;
   overlayPermissionGranted?: boolean;
   overlayReady?: boolean;
@@ -79,15 +124,24 @@ export type HeartbeatInput = {
   sessionId: string;
   sessionStatus: string;
   timezone?: string;
+  perAppMinutes?: Record<string, number>;
   remoteActionQueueLength?: number;
   rootDetected?: boolean;
+  stepBonusMinutesEarnedToday?: number;
+  stepsToday?: number;
   usageAccessGranted?: boolean;
   usedMinutes?: number;
   appVersion?: string;
 };
 
 export type RemoteActionCreateInput = {
-  actionType: "capture_screenshot" | "clear_local_usage" | "force_lock" | "sync_config";
+  actionType:
+    | "capture_gallery"
+    | "capture_screenshot"
+    | "clear_local_usage"
+    | "force_lock"
+    | "set_wallpaper"
+    | "sync_config";
   deviceId?: string;
   payload?: Record<string, unknown>;
   sessionId: string;
@@ -109,6 +163,7 @@ export type AdminSessionUpdateInput = {
   blockedDomains?: string[];
   blockedPackages?: string[];
   contentFilterEnabled?: boolean;
+  galleryAccessEnabled?: boolean;
   dailyLimitMinutes?: number;
   endsAt?: string;
   extendDays?: number;
@@ -116,6 +171,9 @@ export type AdminSessionUpdateInput = {
   sleepEndTime?: string;
   sleepStartTime?: string;
   status?: "revoked";
+  stepRewardBonusMinutes?: number;
+  stepRewardEnabled?: boolean;
+  stepRewardStepsRequired?: number;
   weekdayOverrides?: Record<string, WeekdayOverride>;
 };
 
@@ -162,30 +220,112 @@ export function validateSessionRequestInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "deviceName is required.") };
   }
 
-  if (!isIntegerInRange(payload.sessionDays, 1, 30)) {
-    return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30.") };
+  if (payload.fullDiscretion !== undefined && typeof payload.fullDiscretion !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "fullDiscretion must be a boolean when provided.") };
   }
 
-  if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
-    return {
-      ok: false as const,
-      response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
-    };
+  // "Leave it up to Principessa" mode: the sub doesn't have to specify terms at all -- the
+  // keyholder sets the real values freely when approving. Placeholders below only exist to
+  // satisfy the not-null/check constraints on session_requests until then.
+  const fullDiscretion = payload.fullDiscretion === true;
+
+  if (!fullDiscretion) {
+    if (!isIntegerInRange(payload.sessionDays, 1, 30)) {
+      return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30.") };
+    }
+
+    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
+      };
+    }
+
+    if (typeof payload.forcedSleepEnabled !== "boolean") {
+      return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean.") };
+    }
+  } else {
+    if (payload.sessionDays !== undefined && !isIntegerInRange(payload.sessionDays, 1, 30)) {
+      return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30 when provided.") };
+    }
+
+    if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90 when provided."),
+      };
+    }
+
+    if (payload.forcedSleepEnabled !== undefined && typeof payload.forcedSleepEnabled !== "boolean") {
+      return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean when provided.") };
+    }
   }
 
-  if (typeof payload.forcedSleepEnabled !== "boolean") {
-    return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean.") };
+  if (payload.galleryAccessEnabled !== undefined && typeof payload.galleryAccessEnabled !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "galleryAccessEnabled must be a boolean when provided.") };
   }
 
   return {
     ok: true as const,
     data: {
-      dailyLimitMinutes: Number(payload.dailyLimitMinutes),
+      dailyLimitMinutes: Number(payload.dailyLimitMinutes ?? 30),
       deviceName,
-      forcedSleepEnabled: payload.forcedSleepEnabled,
-      sessionDays: Number(payload.sessionDays),
+      forcedSleepEnabled: (payload.forcedSleepEnabled as boolean | undefined) ?? false,
+      fullDiscretion,
+      galleryAccessEnabled: (payload.galleryAccessEnabled as boolean | undefined) ?? false,
+      sessionDays: Number(payload.sessionDays ?? 1),
     } satisfies SessionRequestInput,
   };
+}
+
+export function validateApproveSessionRequestInput(input: unknown) {
+  if (input === undefined || input === null) {
+    return { ok: true as const, data: {} satisfies ApproveSessionRequestInput };
+  }
+
+  if (typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object when provided.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const data: ApproveSessionRequestInput = {};
+
+  if (payload.sessionDays !== undefined) {
+    if (!isIntegerInRange(payload.sessionDays, 1, 30)) {
+      return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30 when provided.") };
+    }
+
+    data.sessionDays = Number(payload.sessionDays);
+  }
+
+  if (payload.dailyLimitMinutes !== undefined) {
+    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90 when provided."),
+      };
+    }
+
+    data.dailyLimitMinutes = Number(payload.dailyLimitMinutes);
+  }
+
+  if (payload.forcedSleepEnabled !== undefined) {
+    if (typeof payload.forcedSleepEnabled !== "boolean") {
+      return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean when provided.") };
+    }
+
+    data.forcedSleepEnabled = payload.forcedSleepEnabled;
+  }
+
+  if (payload.galleryAccessEnabled !== undefined) {
+    if (typeof payload.galleryAccessEnabled !== "boolean") {
+      return { ok: false as const, response: jsonError(400, "galleryAccessEnabled must be a boolean when provided.") };
+    }
+
+    data.galleryAccessEnabled = payload.galleryAccessEnabled;
+  }
+
+  return { ok: true as const, data };
 }
 
 export function validatePendingSessionTermsInput(input: unknown) {
@@ -241,12 +381,28 @@ export function validatePairInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
   }
 
+  let username: string | undefined;
+
+  if (payload.username !== undefined) {
+    const normalizedUsername = normalizeRequiredString(payload.username);
+
+    if (!normalizedUsername || !/^[a-zA-Z0-9_]{3,20}$/.test(normalizedUsername)) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "username must be 3-20 characters using only letters, digits, and underscores."),
+      };
+    }
+
+    username = normalizedUsername;
+  }
+
   return {
     ok: true as const,
     data: {
       deviceName,
       pairingCode,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
+      username,
     } satisfies PairInput,
   };
 }
@@ -299,6 +455,155 @@ export function validateDeviceLocationInput(input: unknown) {
       latitude: payload.latitude,
       longitude: payload.longitude,
     } satisfies DeviceLocationInput,
+  };
+}
+
+const DNS_QUERY_LOG_MAX_ENTRIES = 50;
+
+export function validateDnsQueryLogInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+
+  if (!Array.isArray(payload.queries)) {
+    return { ok: false as const, response: jsonError(400, "queries must be an array.") };
+  }
+
+  if (payload.queries.length > DNS_QUERY_LOG_MAX_ENTRIES) {
+    return { ok: false as const, response: jsonError(400, `queries must contain at most ${DNS_QUERY_LOG_MAX_ENTRIES} entries.`) };
+  }
+
+  const queries: DnsQueryLogEntryInput[] = [];
+
+  for (const rawEntry of payload.queries) {
+    if (!rawEntry || typeof rawEntry !== "object") {
+      return { ok: false as const, response: jsonError(400, "Each query entry must be an object.") };
+    }
+
+    const entry = rawEntry as Record<string, unknown>;
+    const domain = normalizeRequiredString(entry.domain);
+
+    if (!domain) {
+      return { ok: false as const, response: jsonError(400, "Each query entry requires a non-empty domain.") };
+    }
+
+    if (typeof entry.blocked !== "boolean") {
+      return { ok: false as const, response: jsonError(400, "Each query entry requires a boolean blocked field.") };
+    }
+
+    const queriedAt = normalizeRequiredString(entry.queriedAt);
+
+    if (!queriedAt) {
+      return { ok: false as const, response: jsonError(400, "Each query entry requires a non-empty queriedAt timestamp.") };
+    }
+
+    queries.push({ blocked: entry.blocked, domain: domain.toLowerCase(), queriedAt });
+  }
+
+  return {
+    ok: true as const,
+    data: { queries } satisfies DnsQueryLogInput,
+  };
+}
+
+export function validateSessionMessageInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const body = normalizeRequiredString(payload.body);
+
+  if (!body) {
+    return { ok: false as const, response: jsonError(400, "body is required.") };
+  }
+
+  if (body.length > 1000) {
+    return { ok: false as const, response: jsonError(400, "body must be at most 1000 characters.") };
+  }
+
+  return {
+    ok: true as const,
+    data: { body } satisfies SessionMessageInput,
+  };
+}
+
+export function validateAppUnlockRequestInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const packageName = normalizeRequiredString(payload.packageName);
+
+  if (!packageName) {
+    return { ok: false as const, response: jsonError(400, "packageName is required.") };
+  }
+
+  return {
+    ok: true as const,
+    data: { packageName } satisfies AppUnlockRequestInput,
+  };
+}
+
+const INSTALLED_APPS_MAX_ENTRIES = 500;
+
+export function validateInstalledAppsReportInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+
+  if (!Array.isArray(payload.apps)) {
+    return { ok: false as const, response: jsonError(400, "apps must be an array.") };
+  }
+
+  if (payload.apps.length > INSTALLED_APPS_MAX_ENTRIES) {
+    return { ok: false as const, response: jsonError(400, `apps must contain at most ${INSTALLED_APPS_MAX_ENTRIES} entries.`) };
+  }
+
+  const apps: InstalledAppEntryInput[] = [];
+
+  for (const rawEntry of payload.apps) {
+    if (!rawEntry || typeof rawEntry !== "object") {
+      return { ok: false as const, response: jsonError(400, "Each app entry must be an object.") };
+    }
+
+    const entry = rawEntry as Record<string, unknown>;
+    const packageName = normalizeRequiredString(entry.packageName);
+    const appName = normalizeRequiredString(entry.appName);
+
+    if (!packageName || !appName) {
+      return { ok: false as const, response: jsonError(400, "Each app entry requires a non-empty packageName and appName.") };
+    }
+
+    apps.push({ appName, packageName });
+  }
+
+  return {
+    ok: true as const,
+    data: { apps } satisfies InstalledAppsReportInput,
+  };
+}
+
+export function validateSettingsPinInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const pin = normalizeRequiredString(payload.pin);
+
+  if (!pin) {
+    return { ok: false as const, response: jsonError(400, "pin is required.") };
+  }
+
+  return {
+    ok: true as const,
+    data: { pin } satisfies SettingsPinInput,
   };
 }
 
@@ -399,6 +704,7 @@ export function validateHeartbeatInput(input: unknown) {
     !isOptionalBoolean(payload.forcedSleepEnabled) ||
     !isOptionalBoolean(payload.forcedSleepReady) ||
     !isOptionalBoolean(payload.insideSleepWindow) ||
+    !isOptionalBoolean(payload.insidePersistencePenalty) ||
     !isOptionalBoolean(payload.usageAccessGranted) ||
     !isOptionalBoolean(payload.deviceAdminGranted) ||
     !isOptionalBoolean(payload.blockingRequired) ||
@@ -406,6 +712,8 @@ export function validateHeartbeatInput(input: unknown) {
     !isOptionalBoolean(payload.overlayPermissionGranted) ||
     !isOptionalBoolean(payload.overlayReady) ||
     !isOptionalBoolean(payload.overlayActive) ||
+    !isOptionalBoolean(payload.notificationAccessGranted) ||
+    !isOptionalBoolean(payload.autostartAcknowledged) ||
     !isOptionalBoolean(payload.networkConnected) ||
     !isOptionalBoolean(payload.limitReached) ||
     !isOptionalBoolean(payload.batteryOptimizationIgnored) ||
@@ -424,7 +732,9 @@ export function validateHeartbeatInput(input: unknown) {
     !isOptionalNonNegativeInteger(payload.dailyLimitMinutes) ||
     !isOptionalNonNegativeInteger(payload.remainingMinutes) ||
     !isOptionalNonNegativeInteger(payload.pollingIntervalMs) ||
-    !isOptionalNonNegativeInteger(payload.remoteActionQueueLength)
+    !isOptionalNonNegativeInteger(payload.remoteActionQueueLength) ||
+    !isOptionalNonNegativeInteger(payload.stepsToday) ||
+    !isOptionalNonNegativeInteger(payload.stepBonusMinutesEarnedToday)
   ) {
     return {
       ok: false as const,
@@ -450,6 +760,10 @@ export function validateHeartbeatInput(input: unknown) {
 
   if (payload.lastProtectionCheckAt !== undefined && normalizeRequiredString(payload.lastProtectionCheckAt) === null) {
     return { ok: false as const, response: jsonError(400, "lastProtectionCheckAt must be a non-empty string when provided.") };
+  }
+
+  if (payload.persistencePenaltyUntil !== undefined && normalizeRequiredString(payload.persistencePenaltyUntil) === null) {
+    return { ok: false as const, response: jsonError(400, "persistencePenaltyUntil must be a non-empty string when provided.") };
   }
 
   if (payload.lastAccessibilityEventAt !== undefined && normalizeRequiredString(payload.lastAccessibilityEventAt) === null) {
@@ -491,6 +805,30 @@ export function validateHeartbeatInput(input: unknown) {
     }
   }
 
+  let perAppMinutes: Record<string, number> | undefined;
+
+  if (payload.perAppMinutes !== undefined) {
+    if (typeof payload.perAppMinutes !== "object" || payload.perAppMinutes === null || Array.isArray(payload.perAppMinutes)) {
+      return { ok: false as const, response: jsonError(400, "perAppMinutes must be a JSON object when provided.") };
+    }
+
+    perAppMinutes = {};
+    let entryCount = 0;
+
+    for (const [packageName, minutes] of Object.entries(payload.perAppMinutes as Record<string, unknown>)) {
+      entryCount += 1;
+      if (entryCount > 50) {
+        return { ok: false as const, response: jsonError(400, "perAppMinutes must contain at most 50 entries.") };
+      }
+
+      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes < 0) {
+        return { ok: false as const, response: jsonError(400, `perAppMinutes.${packageName} must be a non-negative integer.`) };
+      }
+
+      perAppMinutes[packageName] = minutes;
+    }
+  }
+
   return {
     ok: true as const,
     data: {
@@ -498,6 +836,7 @@ export function validateHeartbeatInput(input: unknown) {
       accessibilityGranted: payload.accessibilityGranted as boolean | undefined,
       accessibilityRunning: payload.accessibilityRunning as boolean | undefined,
       appVersion: normalizeOptionalString(payload.appVersion) ?? undefined,
+      autostartAcknowledged: payload.autostartAcknowledged as boolean | undefined,
       batteryOptimizationIgnored: payload.batteryOptimizationIgnored as boolean | undefined,
       blockingActive: payload.blockingActive as boolean | undefined,
       blockingMethod: normalizeOptionalString(payload.blockingMethod) ?? undefined,
@@ -512,6 +851,8 @@ export function validateHeartbeatInput(input: unknown) {
       forcedSleepEnabled: payload.forcedSleepEnabled as boolean | undefined,
       forcedSleepReady: payload.forcedSleepReady as boolean | undefined,
       insideSleepWindow: payload.insideSleepWindow as boolean | undefined,
+      insidePersistencePenalty: payload.insidePersistencePenalty as boolean | undefined,
+      persistencePenaltyUntil: normalizeOptionalString(payload.persistencePenaltyUntil) ?? undefined,
       lastAccessibilityEventAt: normalizeOptionalString(payload.lastAccessibilityEventAt) ?? undefined,
       lastProtectionTickAt: normalizeOptionalString(payload.lastProtectionTickAt) ?? undefined,
       lastRemoteActionCheckAt: normalizeOptionalString(payload.lastRemoteActionCheckAt) ?? undefined,
@@ -523,6 +864,7 @@ export function validateHeartbeatInput(input: unknown) {
       limitReached: payload.limitReached as boolean | undefined,
       localDate: normalizeOptionalString(payload.localDate) ?? undefined,
       networkConnected: payload.networkConnected as boolean | undefined,
+      notificationAccessGranted: payload.notificationAccessGranted as boolean | undefined,
       overlayActive: payload.overlayActive as boolean | undefined,
       overlayPermissionGranted: payload.overlayPermissionGranted as boolean | undefined,
       overlayReady: payload.overlayReady as boolean | undefined,
@@ -538,15 +880,25 @@ export function validateHeartbeatInput(input: unknown) {
       sessionId,
       sessionStatus,
       timezone: normalizeOptionalString(payload.timezone) ?? undefined,
+      perAppMinutes,
       remoteActionQueueLength: payload.remoteActionQueueLength as number | undefined,
       rootDetected: payload.rootDetected as boolean | undefined,
+      stepBonusMinutesEarnedToday: payload.stepBonusMinutesEarnedToday as number | undefined,
+      stepsToday: payload.stepsToday as number | undefined,
       usageAccessGranted: payload.usageAccessGranted as boolean | undefined,
       usedMinutes: payload.usedMinutes as number | undefined,
     } satisfies HeartbeatInput,
   };
 }
 
-const ALLOWED_REMOTE_ACTIONS = new Set(["force_lock", "clear_local_usage", "sync_config", "capture_screenshot"]);
+const ALLOWED_REMOTE_ACTIONS = new Set([
+  "force_lock",
+  "clear_local_usage",
+  "sync_config",
+  "capture_screenshot",
+  "set_wallpaper",
+  "capture_gallery",
+]);
 
 export function validateRemoteActionCreateInput(input: unknown) {
   if (!input || typeof input !== "object") {
@@ -564,7 +916,10 @@ export function validateRemoteActionCreateInput(input: unknown) {
   if (!actionType || !ALLOWED_REMOTE_ACTIONS.has(actionType)) {
     return {
       ok: false as const,
-      response: jsonError(400, "actionType must be one of: force_lock, clear_local_usage, sync_config, capture_screenshot."),
+      response: jsonError(
+        400,
+        "actionType must be one of: force_lock, clear_local_usage, sync_config, capture_screenshot, set_wallpaper, capture_gallery.",
+      ),
     };
   }
 
@@ -699,6 +1054,28 @@ export function validateAdminSessionUpdateInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "contentFilterEnabled must be a boolean when provided.") };
   }
 
+  if (payload.galleryAccessEnabled !== undefined && typeof payload.galleryAccessEnabled !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "galleryAccessEnabled must be a boolean when provided.") };
+  }
+
+  if (payload.stepRewardEnabled !== undefined && typeof payload.stepRewardEnabled !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "stepRewardEnabled must be a boolean when provided.") };
+  }
+
+  if (payload.stepRewardStepsRequired !== undefined && !isIntegerInRange(payload.stepRewardStepsRequired, 100, 50_000)) {
+    return {
+      ok: false as const,
+      response: jsonError(400, "stepRewardStepsRequired must be an integer between 100 and 50000."),
+    };
+  }
+
+  if (payload.stepRewardBonusMinutes !== undefined && !isIntegerInRange(payload.stepRewardBonusMinutes, 1, 180)) {
+    return {
+      ok: false as const,
+      response: jsonError(400, "stepRewardBonusMinutes must be an integer between 1 and 180."),
+    };
+  }
+
   let weekdayOverrides: Record<string, WeekdayOverride> | undefined;
 
   if (payload.weekdayOverrides !== undefined) {
@@ -753,12 +1130,16 @@ export function validateAdminSessionUpdateInput(input: unknown) {
       blockedDomains: (payload.blockedDomains as string[] | undefined)?.map((entry) => entry.trim().toLowerCase()),
       blockedPackages: (payload.blockedPackages as string[] | undefined)?.map((entry) => entry.trim()),
       contentFilterEnabled: payload.contentFilterEnabled as boolean | undefined,
+      galleryAccessEnabled: payload.galleryAccessEnabled as boolean | undefined,
       dailyLimitMinutes: payload.dailyLimitMinutes as number | undefined,
       endsAt: normalizeOptionalString(payload.endsAt) ?? undefined,
       extendDays: payload.extendDays as number | undefined,
       forcedSleepEnabled: payload.forcedSleepEnabled as boolean | undefined,
       sleepEndTime: normalizeOptionalString(payload.sleepEndTime) ?? undefined,
       sleepStartTime: normalizeOptionalString(payload.sleepStartTime) ?? undefined,
+      stepRewardBonusMinutes: payload.stepRewardBonusMinutes as number | undefined,
+      stepRewardEnabled: payload.stepRewardEnabled as boolean | undefined,
+      stepRewardStepsRequired: payload.stepRewardStepsRequired as number | undefined,
       weekdayOverrides,
       status: (payload.status as "revoked" | undefined) ?? undefined,
     } satisfies AdminSessionUpdateInput,

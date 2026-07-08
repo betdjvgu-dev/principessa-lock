@@ -16,6 +16,8 @@ function buildInsertPayload(input: SessionRequestInput, deviceId: string, subId:
     device_id: deviceId,
     device_name: input.deviceName,
     forced_sleep_enabled: input.forcedSleepEnabled,
+    full_discretion: input.fullDiscretion,
+    gallery_access_enabled: input.galleryAccessEnabled,
     requested_days: input.sessionDays,
     sub_id: subId,
   };

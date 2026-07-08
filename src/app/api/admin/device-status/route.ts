@@ -9,6 +9,7 @@ type HeartbeatRow = {
   accessibility_running: boolean | null;
   active_session_present: boolean | null;
   app_version: string | null;
+  autostart_acknowledged: boolean | null;
   battery_optimization_ignored: boolean | null;
   blocking_active: boolean | null;
   blocking_method: string | null;
@@ -24,6 +25,8 @@ type HeartbeatRow = {
   forced_sleep_ready: boolean | null;
   id: string;
   inside_sleep_window: boolean | null;
+  inside_persistence_penalty: boolean | null;
+  persistence_penalty_until: string | null;
   last_accessibility_event_at: string | null;
   last_protection_tick_at: string | null;
   last_remote_action_check_at: string | null;
@@ -35,6 +38,7 @@ type HeartbeatRow = {
   limit_reached: boolean | null;
   local_date: string | null;
   network_connected: boolean | null;
+  notification_access_granted: boolean | null;
   overlay_active: boolean | null;
   overlay_permission_granted: boolean | null;
   overlay_ready: boolean | null;
@@ -80,7 +84,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("device_heartbeats")
     .select(
-      "id, device_id, session_id, sub_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length, root_detected, emulator_detected, debugger_attached",
+      "id, device_id, session_id, sub_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, inside_persistence_penalty, persistence_penalty_until, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, notification_access_granted, autostart_acknowledged, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length, root_detected, emulator_detected, debugger_attached",
     )
     .order("received_at", { ascending: false })
     .returns<HeartbeatRow[]>();
@@ -106,6 +110,7 @@ export async function GET(request: Request) {
       accessibilityGranted: row.accessibility_granted,
       accessibilityRunning: row.accessibility_running,
       appVersion: row.app_version,
+      autostartAcknowledged: row.autostart_acknowledged,
       batteryOptimizationIgnored: row.battery_optimization_ignored,
       blockingActive: row.blocking_active,
       blockingMethod: row.blocking_method,
@@ -120,6 +125,8 @@ export async function GET(request: Request) {
       forcedSleepEnabled: row.forced_sleep_enabled,
       forcedSleepReady: row.forced_sleep_ready,
       insideSleepWindow: row.inside_sleep_window,
+      insidePersistencePenalty: row.inside_persistence_penalty,
+      persistencePenaltyUntil: row.persistence_penalty_until,
       lastAccessibilityEventAt: row.last_accessibility_event_at,
       lastProtectionTickAt: row.last_protection_tick_at,
       lastRemoteActionCheckAt: row.last_remote_action_check_at,
@@ -132,6 +139,7 @@ export async function GET(request: Request) {
       limitReached: row.limit_reached,
       localDate: row.local_date,
       networkConnected: row.network_connected,
+      notificationAccessGranted: row.notification_access_granted,
       overlayActive: row.overlay_active,
       overlayPermissionGranted: row.overlay_permission_granted,
       overlayReady: row.overlay_ready,

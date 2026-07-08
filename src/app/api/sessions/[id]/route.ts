@@ -20,12 +20,16 @@ type SessionRow = {
   device_id: string;
   ends_at: string;
   forced_sleep_enabled: boolean;
+  gallery_access_enabled: boolean;
   id: string;
   session_days: number;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  step_reward_bonus_minutes: number;
+  step_reward_enabled: boolean;
+  step_reward_steps_required: number;
   timezone: string | null;
   updated_at: string;
 };
@@ -56,7 +60,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: session, error } = await supabase
     .from("sessions")
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled")
     .eq("id", id)
     .maybeSingle<SessionRow>();
 
@@ -68,10 +72,20 @@ export async function GET(request: Request, context: RouteContext) {
     return jsonError(404, "Session not found.");
   }
 
+  const nowIso = new Date().toISOString();
+  const { data: unlocks } = await supabase
+    .from("app_unlock_requests")
+    .select("package_name")
+    .eq("session_id", id)
+    .eq("status", "approved")
+    .gt("expires_at", nowIso)
+    .returns<{ package_name: string }[]>();
+
   return jsonOk({
     ok: true,
     activatedAt: session.activated_at,
     blockedPackages: session.blocked_packages,
+    unlockedPackages: (unlocks ?? []).map((row) => row.package_name),
     blockedDomains: session.blocked_domains,
     contentFilterEnabled: session.content_filter_enabled,
     weekdayOverrides: session.weekday_overrides,
@@ -79,6 +93,7 @@ export async function GET(request: Request, context: RouteContext) {
     deviceId: session.device_id,
     endsAt: session.ends_at,
     forcedSleepEnabled: session.forced_sleep_enabled,
+    galleryAccessEnabled: session.gallery_access_enabled,
     configVersion: session.config_version,
     sessionDays: session.session_days,
     sessionId: session.id,
@@ -86,6 +101,9 @@ export async function GET(request: Request, context: RouteContext) {
     sleepStartTime: session.sleep_start_time,
     startsAt: session.starts_at,
     status: session.status,
+    stepRewardBonusMinutes: session.step_reward_bonus_minutes,
+    stepRewardEnabled: session.step_reward_enabled,
+    stepRewardStepsRequired: session.step_reward_steps_required,
     timezone: session.timezone,
     updatedAt: session.updated_at,
   });

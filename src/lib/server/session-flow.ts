@@ -12,8 +12,9 @@ export type SessionRequestRow = {
   device_id: string | null;
   device_name: string;
   forced_sleep_enabled: boolean;
+  full_discretion: boolean;
+  gallery_access_enabled: boolean;
   id: string;
-  payment_note: string | null;
   rejected_at: string | null;
   requested_days: number;
   status: "pending" | "approved" | "rejected" | "activated" | "expired";

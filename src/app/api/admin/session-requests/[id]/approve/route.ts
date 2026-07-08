@@ -1,6 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
+import { readJsonBody, validateApproveSessionRequestInput, type ApproveSessionRequestInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { generateUniqueActivationCode, type SessionRequestRow } from "@/lib/server/session-flow";
@@ -47,6 +48,43 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (sessionRequest.status !== "pending") {
     return jsonError(409, "Only pending session requests can be approved.");
+  }
+
+  // Body is optional -- most approvals send none (accept the request as-is). Only a
+  // full_discretion request actually uses overrides, but they're harmlessly ignored otherwise
+  // rather than rejecting a body sent by an older/newer client.
+  let overrideInput: unknown;
+
+  try {
+    const rawBody = await request.text();
+    overrideInput = rawBody.trim() ? JSON.parse(rawBody) : undefined;
+  } catch {
+    return jsonError(400, "Invalid JSON request body.");
+  }
+
+  const overrideValidation = validateApproveSessionRequestInput(overrideInput);
+
+  if (!overrideValidation.ok) {
+    return overrideValidation.response;
+  }
+
+  const overrides: ApproveSessionRequestInput = sessionRequest.full_discretion ? overrideValidation.data : {};
+
+  if (sessionRequest.full_discretion) {
+    const { error: overrideError } = await supabase
+      .from("session_requests")
+      .update({
+        daily_limit_minutes: overrides.dailyLimitMinutes ?? sessionRequest.daily_limit_minutes,
+        forced_sleep_enabled: overrides.forcedSleepEnabled ?? sessionRequest.forced_sleep_enabled,
+        gallery_access_enabled: overrides.galleryAccessEnabled ?? sessionRequest.gallery_access_enabled,
+        requested_days: overrides.sessionDays ?? sessionRequest.requested_days,
+      })
+      .eq("id", id)
+      .eq("status", "pending");
+
+    if (overrideError) {
+      return jsonSupabaseError("Failed to apply keyholder-set terms to the session request.", overrideError);
+    }
   }
 
   let uniqueCode: { activationCode: string; activationCodeHash: string };

@@ -25,6 +25,7 @@ type SessionRow = {
   device_id: string;
   ends_at: string;
   forced_sleep_enabled: boolean;
+  gallery_access_enabled: boolean;
   id: string;
   request_id: string;
   session_days: number;
@@ -32,6 +33,9 @@ type SessionRow = {
   sleep_start_time: string;
   starts_at: string;
   status: string;
+  step_reward_bonus_minutes: number;
+  step_reward_enabled: boolean;
+  step_reward_steps_required: number;
   timezone: string | null;
   updated_at: string;
   weekday_overrides: Record<string, unknown>;
@@ -55,6 +59,7 @@ function formatSessionResponse(session: SessionRow) {
     device_id: session.device_id,
     ends_at: session.ends_at,
     forced_sleep_enabled: session.forced_sleep_enabled,
+    gallery_access_enabled: session.gallery_access_enabled,
     id: session.id,
     request_id: session.request_id,
     session_days: session.session_days,
@@ -62,6 +67,9 @@ function formatSessionResponse(session: SessionRow) {
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,
     status: session.status,
+    step_reward_bonus_minutes: session.step_reward_bonus_minutes,
+    step_reward_enabled: session.step_reward_enabled,
+    step_reward_steps_required: session.step_reward_steps_required,
     timezone: session.timezone,
     updated_at: session.updated_at,
   };
@@ -110,6 +118,22 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
     updatePayload.content_filter_enabled = input.contentFilterEnabled;
   }
 
+  if (input.galleryAccessEnabled !== undefined) {
+    updatePayload.gallery_access_enabled = input.galleryAccessEnabled;
+  }
+
+  if (input.stepRewardEnabled !== undefined) {
+    updatePayload.step_reward_enabled = input.stepRewardEnabled;
+  }
+
+  if (input.stepRewardStepsRequired !== undefined) {
+    updatePayload.step_reward_steps_required = input.stepRewardStepsRequired;
+  }
+
+  if (input.stepRewardBonusMinutes !== undefined) {
+    updatePayload.step_reward_bonus_minutes = input.stepRewardBonusMinutes;
+  }
+
   if (input.weekdayOverrides !== undefined) {
     updatePayload.weekday_overrides = input.weekdayOverrides;
   }
@@ -152,7 +176,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { data: session, error: loadError } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
     )
     .eq("id", id)
     .maybeSingle<SessionRow>();
@@ -185,7 +209,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .update(updatePayload)
     .eq("id", id)
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
     )
     .maybeSingle<SessionRow>();
 

@@ -3,6 +3,7 @@ import { hashPairingCode } from "@/lib/server/activation-codes";
 import { generateDeviceSecret, hashDeviceSecret } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validatePairInput, type PairInput } from "@/lib/server/request-validation";
+import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -11,6 +12,7 @@ type ClaimedSubRow = {
   pending_daily_limit_minutes: number | null;
   pending_forced_sleep_enabled: boolean | null;
   pending_session_days: number | null;
+  username: string | null;
 };
 
 type SessionRow = {
@@ -61,11 +63,26 @@ export async function POST(request: Request) {
     return validation.response;
   }
 
-  const { deviceName, pairingCode, timezone } = validation.data;
+  const { deviceName, pairingCode, timezone, username } = validation.data;
 
   const supabase = getSupabaseAdminClient();
   const pairingCodeHash = hashPairingCode(pairingCode);
   const nowIso = new Date().toISOString();
+
+  // Username is chosen once, at first pairing, and never re-asked -- re-pairing (reinstall,
+  // new device) reuses whatever's already on the sub row instead of overwriting it. Read-only
+  // pre-check; the actual claim below is still the atomic step that prevents a race.
+  const { data: precheckSub } = await supabase
+    .from("subs")
+    .select("username")
+    .eq("pairing_code_hash", pairingCodeHash)
+    .maybeSingle<{ username: string | null }>();
+
+  const needsUsername = precheckSub ? !precheckSub.username : false;
+
+  if (needsUsername && !username) {
+    return jsonError(400, "Choose a username to finish pairing.");
+  }
 
   const { data: claimedSub, error: claimError } = await supabase
     .from("subs")
@@ -76,13 +93,18 @@ export async function POST(request: Request) {
       pending_forced_sleep_enabled: null,
       pending_session_days: null,
       status: "active",
+      ...(needsUsername && username ? { username } : {}),
     })
     .eq("pairing_code_hash", pairingCodeHash)
     .gt("pairing_code_expires_at", nowIso)
-    .select("id, pending_session_days, pending_daily_limit_minutes, pending_forced_sleep_enabled")
+    .select("id, pending_session_days, pending_daily_limit_minutes, pending_forced_sleep_enabled, username")
     .maybeSingle<ClaimedSubRow>();
 
   if (claimError) {
+    if (claimError.code === "23505") {
+      return jsonError(409, "That username is already taken. Choose another and try again.");
+    }
+
     return jsonSupabaseError("Failed to claim pairing code.", claimError);
   }
 
@@ -166,6 +188,7 @@ export async function POST(request: Request) {
       device_id: device.id,
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: claimedSub.pending_forced_sleep_enabled,
+      price_usd: calculateSessionPriceUsd(claimedSub.pending_session_days, claimedSub.pending_daily_limit_minutes),
       request_id: sessionRequest.id,
       session_days: claimedSub.pending_session_days,
       sleep_end_time: "07:00",
@@ -210,5 +233,6 @@ export async function POST(request: Request) {
       activatedAt: session.activated_at,
     },
     subId: claimedSub.id,
+    username: claimedSub.username,
   });
 }
