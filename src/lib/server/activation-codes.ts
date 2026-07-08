@@ -34,15 +34,3 @@ export function hashActivationCode(activationCode: string) {
 export function generateActivationCode() {
   return generateCode();
 }
-
-export function normalizePairingCode(pairingCode: string) {
-  return pairingCode.trim().toUpperCase();
-}
-
-export function hashPairingCode(pairingCode: string) {
-  return createHash("sha256").update(normalizePairingCode(pairingCode)).digest("hex");
-}
-
-export function generatePairingCode() {
-  return generateCode();
-}

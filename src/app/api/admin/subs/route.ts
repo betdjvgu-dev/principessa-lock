@@ -1,7 +1,6 @@
-import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
-import { readJsonBody } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -12,10 +11,8 @@ type SubRow = {
   status: string;
 };
 
-type CreateSubInput = {
-  label: string;
-};
-
+// Subs are now created only via self-registration (/api/register) -- there is no admin-facing
+// "create a sub" action anymore, so this route is read-only.
 export async function GET(request: Request) {
   const rateLimitError = await enforceAdminRateLimit(request, "subs:list");
 
@@ -44,43 +41,4 @@ export async function GET(request: Request) {
     ok: true,
     subs: data,
   });
-}
-
-export async function POST(request: Request) {
-  const rateLimitError = await enforceAdminRateLimit(request, "subs:create");
-
-  if (rateLimitError) {
-    return rateLimitError;
-  }
-
-  const auth = await verifyAdminRequest(request);
-
-  if (auth.error) {
-    return auth.error;
-  }
-
-  const bodyResult = await readJsonBody<CreateSubInput>(request);
-
-  if (!bodyResult.ok) {
-    return bodyResult.response;
-  }
-
-  const label = typeof bodyResult.data.label === "string" ? bodyResult.data.label.trim() : "";
-
-  if (!label) {
-    return jsonError(400, "label is required.");
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("subs")
-    .insert({ label, status: "invited" })
-    .select("id, label, status, created_at")
-    .single<SubRow>();
-
-  if (error) {
-    return jsonSupabaseError("Failed to create sub.", error);
-  }
-
-  return jsonOk({ ok: true, sub: data }, { status: 201 });
 }

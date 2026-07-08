@@ -3,8 +3,7 @@ import {
   validateActivationInput,
   validateAdminSessionUpdateInput,
   validateFcmTokenInput,
-  validatePairInput,
-  validatePendingSessionTermsInput,
+  validateRegisterInput,
   validateRemoteActionCreateInput,
   validateSessionRequestInput,
 } from "./request-validation";
@@ -67,25 +66,26 @@ describe("validateActivationInput", () => {
   });
 });
 
-describe("validatePairInput", () => {
+describe("validateRegisterInput", () => {
   it("accepts a well-formed payload", () => {
-    const result = validatePairInput({ deviceName: "Pixel 7", pairingCode: "AUPQ-8T27-M4KX-2Q7Z" });
+    const result = validateRegisterInput({ deviceName: "Pixel 7", username: "alex_92" });
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a missing pairingCode", () => {
-    expect(validatePairInput({ deviceName: "Pixel 7" }).ok).toBe(false);
-  });
-});
-
-describe("validatePendingSessionTermsInput", () => {
-  it("accepts valid terms", () => {
-    const result = validatePendingSessionTermsInput({ dailyLimitMinutes: 30, forcedSleepEnabled: false, sessionDays: 3 });
-    expect(result.ok).toBe(true);
+  it("rejects a missing username", () => {
+    expect(validateRegisterInput({ deviceName: "Pixel 7" }).ok).toBe(false);
   });
 
-  it("rejects a missing forcedSleepEnabled", () => {
-    expect(validatePendingSessionTermsInput({ dailyLimitMinutes: 30, sessionDays: 3 }).ok).toBe(false);
+  it("rejects a username with invalid characters", () => {
+    expect(validateRegisterInput({ deviceName: "Pixel 7", username: "a b!" }).ok).toBe(false);
+  });
+
+  it("rejects a username shorter than 3 characters", () => {
+    expect(validateRegisterInput({ deviceName: "Pixel 7", username: "ab" }).ok).toBe(false);
+  });
+
+  it("rejects a missing deviceName", () => {
+    expect(validateRegisterInput({ username: "alex_92" }).ok).toBe(false);
   });
 });
 

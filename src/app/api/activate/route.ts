@@ -3,7 +3,7 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateActivationInput, type ActivationInput } from "@/lib/server/request-validation";
-import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
+import { calculateSessionPriceUsd, FULL_DISCRETION_MINIMUM_PRICE_USD } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
@@ -147,11 +147,20 @@ export async function POST(request: Request) {
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
       gallery_access_enabled: sessionRequest.gallery_access_enabled,
-      price_usd: calculateSessionPriceUsd(
-        sessionRequest.requested_days,
-        sessionRequest.daily_limit_minutes,
-        sessionRequest.gallery_access_enabled,
-      ),
+      price_usd: sessionRequest.full_discretion
+        ? Math.max(
+            calculateSessionPriceUsd(
+              sessionRequest.requested_days,
+              sessionRequest.daily_limit_minutes,
+              sessionRequest.gallery_access_enabled,
+            ),
+            FULL_DISCRETION_MINIMUM_PRICE_USD,
+          )
+        : calculateSessionPriceUsd(
+            sessionRequest.requested_days,
+            sessionRequest.daily_limit_minutes,
+            sessionRequest.gallery_access_enabled,
+          ),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
       sleep_end_time: "07:00",

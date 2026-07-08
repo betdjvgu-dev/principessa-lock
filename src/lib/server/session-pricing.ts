@@ -9,6 +9,13 @@ const FREE_DAILY_LIMIT_MINUTES = 60;
 const PRICE_PER_5_MINUTES_USD = 1;
 const GALLERY_ACCESS_PRICE_USD = 10;
 
+// Floor applied to "leave it up to Principessa" (full_discretion) session requests -- the sub
+// is told this minimum up front (see FULL_DISCRETION_MINIMUM_PRICE_USD in
+// principessa-lock/.../SessionPricing.kt) before the keyholder ever sets real terms, so the
+// stored price (and therefore the leaderboard total) must never come out under it regardless
+// of how cheap the terms the keyholder ends up choosing are.
+export const FULL_DISCRETION_MINIMUM_PRICE_USD = 50;
+
 export function calculateSessionPriceUsd(
   sessionDays: number,
   dailyLimitMinutes: number,

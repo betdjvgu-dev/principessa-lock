@@ -55,15 +55,15 @@ create table if not exists public.subs (
   id uuid primary key default gen_random_uuid(),
   label text not null,
   status text not null default 'invited',
-  pairing_code_hash text,
-  pairing_code_expires_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint subs_status_check check (status in ('invited', 'active', 'archived'))
 );
 
--- Chosen once by the sub at first pairing (never re-asked); used for the in-app leaderboard,
--- ranked by the sum of that sub's activated sessions' price_usd (see sessions.price_usd below).
+-- Chosen once at self-registration (never re-asked); used for the in-app leaderboard, ranked
+-- by the sum of that sub's activated sessions' price_usd (see sessions.price_usd below), and
+-- as the persistent identity a sub registers with (see /api/register) -- never reusable once
+-- taken, even if the original device/install is gone.
 alter table public.subs
   add column if not exists username text;
 
@@ -71,18 +71,25 @@ create unique index if not exists subs_username_lower_key
   on public.subs (lower(username))
   where username is not null;
 
-alter table public.subs
-  add column if not exists pending_session_days integer;
+-- The pairing-code flow (admin pre-creates a sub + generates a one-time code the device
+-- redeems) was replaced by direct self-registration with a unique username -- these columns
+-- and their index are dead.
+drop index if exists subs_pairing_code_hash_key;
 
 alter table public.subs
-  add column if not exists pending_daily_limit_minutes integer;
+  drop column if exists pairing_code_hash;
 
 alter table public.subs
-  add column if not exists pending_forced_sleep_enabled boolean;
+  drop column if exists pairing_code_expires_at;
 
-create unique index if not exists subs_pairing_code_hash_key
-  on public.subs (pairing_code_hash)
-  where pairing_code_hash is not null;
+alter table public.subs
+  drop column if exists pending_session_days;
+
+alter table public.subs
+  drop column if exists pending_daily_limit_minutes;
+
+alter table public.subs
+  drop column if exists pending_forced_sleep_enabled;
 
 create index if not exists subs_status_created_at_idx
   on public.subs (status, created_at desc);
@@ -119,6 +126,12 @@ alter table public.devices
 
 alter table public.devices
   add column if not exists sub_id uuid references public.subs(id) on delete cascade;
+
+-- A device name is chosen once at self-registration alongside the username and can't be
+-- reused afterward either, same as username -- both together are what identifies a sub, so
+-- letting either be claimed twice would let someone impersonate an existing registration.
+create unique index if not exists devices_device_name_lower_key
+  on public.devices (lower(device_name));
 
 -- Latest-known-location only (no history table) -- periodic background reports overwrite
 -- these each time, matching how last_seen_at already works for heartbeats.

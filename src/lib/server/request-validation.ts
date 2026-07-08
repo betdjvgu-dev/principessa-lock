@@ -22,17 +22,10 @@ export type ActivationInput = {
   timezone?: string;
 };
 
-export type PendingSessionTermsInput = {
-  dailyLimitMinutes: number;
-  forcedSleepEnabled: boolean;
-  sessionDays: number;
-};
-
-export type PairInput = {
+export type RegisterInput = {
   deviceName: string;
-  pairingCode: string;
+  username: string;
   timezone?: string;
-  username?: string;
 };
 
 export type FcmTokenInput = {
@@ -328,82 +321,37 @@ export function validateApproveSessionRequestInput(input: unknown) {
   return { ok: true as const, data };
 }
 
-export function validatePendingSessionTermsInput(input: unknown) {
+export function validateRegisterInput(input: unknown) {
   if (!input || typeof input !== "object") {
     return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
   }
 
   const payload = input as Record<string, unknown>;
-
-  if (!isIntegerInRange(payload.sessionDays, 1, 30)) {
-    return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30.") };
-  }
-
-  if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
-    return {
-      ok: false as const,
-      response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
-    };
-  }
-
-  if (typeof payload.forcedSleepEnabled !== "boolean") {
-    return { ok: false as const, response: jsonError(400, "forcedSleepEnabled must be a boolean.") };
-  }
-
-  return {
-    ok: true as const,
-    data: {
-      dailyLimitMinutes: Number(payload.dailyLimitMinutes),
-      forcedSleepEnabled: payload.forcedSleepEnabled,
-      sessionDays: Number(payload.sessionDays),
-    } satisfies PendingSessionTermsInput,
-  };
-}
-
-export function validatePairInput(input: unknown) {
-  if (!input || typeof input !== "object") {
-    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
-  }
-
-  const payload = input as Record<string, unknown>;
-  const pairingCode = normalizeRequiredString(payload.pairingCode);
   const deviceName = normalizeRequiredString(payload.deviceName);
-
-  if (!pairingCode) {
-    return { ok: false as const, response: jsonError(400, "pairingCode is required.") };
-  }
+  const username = normalizeRequiredString(payload.username);
 
   if (!deviceName) {
     return { ok: false as const, response: jsonError(400, "deviceName is required.") };
+  }
+
+  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    return {
+      ok: false as const,
+      response: jsonError(400, "username must be 3-20 characters using only letters, digits, and underscores."),
+    };
   }
 
   if (payload.timezone !== undefined && normalizeRequiredString(payload.timezone) === null) {
     return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
   }
 
-  let username: string | undefined;
-
-  if (payload.username !== undefined) {
-    const normalizedUsername = normalizeRequiredString(payload.username);
-
-    if (!normalizedUsername || !/^[a-zA-Z0-9_]{3,20}$/.test(normalizedUsername)) {
-      return {
-        ok: false as const,
-        response: jsonError(400, "username must be 3-20 characters using only letters, digits, and underscores."),
-      };
-    }
-
-    username = normalizedUsername;
-  }
-
   return {
     ok: true as const,
     data: {
       deviceName,
-      pairingCode,
-      timezone: normalizeRequiredString(payload.timezone) ?? undefined,
       username,
-    } satisfies PairInput,
+      timezone: normalizeRequiredString(payload.timezone) ?? undefined,
+    } satisfies RegisterInput,
   };
 }
 
