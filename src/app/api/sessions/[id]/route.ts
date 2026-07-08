@@ -11,6 +11,10 @@ type RouteContext = {
 
 type SessionRow = {
   activated_at: string;
+  blocked_packages: string[];
+  blocked_domains: string[];
+  content_filter_enabled: boolean;
+  weekday_overrides: Record<string, unknown>;
   config_version: number;
   daily_limit_minutes: number;
   device_id: string;
@@ -52,7 +56,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: session, error } = await supabase
     .from("sessions")
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled")
     .eq("id", id)
     .maybeSingle<SessionRow>();
 
@@ -67,6 +71,10 @@ export async function GET(request: Request, context: RouteContext) {
   return jsonOk({
     ok: true,
     activatedAt: session.activated_at,
+    blockedPackages: session.blocked_packages,
+    blockedDomains: session.blocked_domains,
+    contentFilterEnabled: session.content_filter_enabled,
+    weekdayOverrides: session.weekday_overrides,
     dailyLimitMinutes: session.daily_limit_minutes,
     deviceId: session.device_id,
     endsAt: session.ends_at,

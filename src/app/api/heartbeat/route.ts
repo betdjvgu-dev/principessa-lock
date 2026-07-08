@@ -133,5 +133,20 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Heartbeat was stored but device last seen update failed.", updateError);
   }
 
+  // Best-effort: only the fields needed for the usage-history chart. Missing any of them
+  // (older app builds, a heartbeat sent before the session engine has a local date yet)
+  // just skips this day's row rather than failing the whole heartbeat.
+  if (heartbeat.localDate && heartbeat.usedMinutes !== undefined && heartbeat.dailyLimitMinutes !== undefined) {
+    await supabase.from("session_daily_usage").upsert(
+      {
+        limit_minutes: heartbeat.dailyLimitMinutes,
+        local_date: heartbeat.localDate,
+        session_id: heartbeat.sessionId,
+        used_minutes: heartbeat.usedMinutes,
+      },
+      { onConflict: "session_id,local_date" },
+    );
+  }
+
   return jsonOk({ ok: true });
 }

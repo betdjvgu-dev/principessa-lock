@@ -16,12 +16,24 @@ type SessionHeartbeatSummaryRow = {
   used_minutes: number | null;
 };
 
+type DeviceLocation = {
+  accuracyMeters: number | null;
+  latitude: number;
+  longitude: number;
+  recordedAt: string;
+} | null;
+
 type SessionRow = {
   activated_at: string;
+  blocked_packages: string[];
+  blocked_domains: string[];
+  content_filter_enabled: boolean;
+  weekday_overrides: Record<string, unknown>;
   config_version: number;
   daily_limit_minutes: number;
   device_id: string;
   device_name: string | null;
+  device_location: DeviceLocation;
   ends_at: string;
   forced_sleep_enabled: boolean;
   id: string;
@@ -37,12 +49,24 @@ type SessionRow = {
   updated_at: string;
 };
 
+type RawDevice = {
+  device_name: string;
+  last_latitude: number | null;
+  last_longitude: number | null;
+  last_location_accuracy_m: number | null;
+  last_location_at: string | null;
+};
+
 type RawSessionRow = {
   activated_at: string;
+  blocked_packages: string[];
+  blocked_domains: string[];
+  content_filter_enabled: boolean;
+  weekday_overrides: Record<string, unknown>;
   config_version: number;
   daily_limit_minutes: number;
   device_id: string;
-  devices: { device_name: string } | { device_name: string }[] | null;
+  devices: RawDevice | RawDevice[] | null;
   ends_at: string;
   forced_sleep_enabled: boolean;
   id: string;
@@ -58,12 +82,31 @@ type RawSessionRow = {
   updated_at: string;
 };
 
-function extractDeviceName(value: RawSessionRow["devices"]) {
+function extractDevice(value: RawSessionRow["devices"]): RawDevice | null {
   if (Array.isArray(value)) {
-    return value[0]?.device_name ?? null;
+    return value[0] ?? null;
   }
 
-  return value?.device_name ?? null;
+  return value;
+}
+
+function extractDeviceName(value: RawSessionRow["devices"]) {
+  return extractDevice(value)?.device_name ?? null;
+}
+
+function extractDeviceLocation(value: RawSessionRow["devices"]): DeviceLocation {
+  const device = extractDevice(value);
+
+  if (!device || device.last_latitude === null || device.last_longitude === null || !device.last_location_at) {
+    return null;
+  }
+
+  return {
+    accuracyMeters: device.last_location_accuracy_m,
+    latitude: device.last_latitude,
+    longitude: device.last_longitude,
+    recordedAt: device.last_location_at,
+  };
 }
 
 function extractSubLabel(value: RawSessionRow["subs"]) {
@@ -91,7 +134,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, devices(device_name), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -103,10 +146,15 @@ export async function GET(request: Request) {
 
   const sessions: SessionRow[] = (data ?? []).map((session) => ({
     activated_at: session.activated_at,
+    blocked_packages: session.blocked_packages,
+    blocked_domains: session.blocked_domains,
+    content_filter_enabled: session.content_filter_enabled,
+    weekday_overrides: session.weekday_overrides,
     config_version: session.config_version,
     daily_limit_minutes: session.daily_limit_minutes,
     device_id: session.device_id,
     device_name: extractDeviceName(session.devices),
+    device_location: extractDeviceLocation(session.devices),
     ends_at: session.ends_at,
     forced_sleep_enabled: session.forced_sleep_enabled,
     id: session.id,

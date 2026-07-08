@@ -29,6 +29,12 @@ export type FcmTokenInput = {
   fcmToken: string;
 };
 
+export type DeviceLocationInput = {
+  accuracyMeters?: number;
+  latitude: number;
+  longitude: number;
+};
+
 export type HeartbeatInput = {
   accessibilityGranted?: boolean;
   accessibilityRunning?: boolean;
@@ -81,7 +87,7 @@ export type HeartbeatInput = {
 };
 
 export type RemoteActionCreateInput = {
-  actionType: "clear_local_usage" | "force_lock" | "sync_config";
+  actionType: "capture_screenshot" | "clear_local_usage" | "force_lock" | "sync_config";
   deviceId?: string;
   payload?: Record<string, unknown>;
   sessionId: string;
@@ -93,7 +99,16 @@ export type RemoteActionCompleteInput = {
   result?: Record<string, unknown>;
 };
 
+export type WeekdayOverride = {
+  dailyLimitMinutes?: number;
+  sleepEndTime?: string;
+  sleepStartTime?: string;
+};
+
 export type AdminSessionUpdateInput = {
+  blockedDomains?: string[];
+  blockedPackages?: string[];
+  contentFilterEnabled?: boolean;
   dailyLimitMinutes?: number;
   endsAt?: string;
   extendDays?: number;
@@ -101,7 +116,10 @@ export type AdminSessionUpdateInput = {
   sleepEndTime?: string;
   sleepStartTime?: string;
   status?: "revoked";
+  weekdayOverrides?: Record<string, WeekdayOverride>;
 };
+
+const WEEKDAY_KEYS = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 
 export async function readJsonBody<T>(request: Request) {
   try {
@@ -248,6 +266,39 @@ export function validateFcmTokenInput(input: unknown) {
   return {
     ok: true as const,
     data: { fcmToken } satisfies FcmTokenInput,
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function validateDeviceLocationInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+
+  if (!isFiniteNumber(payload.latitude) || payload.latitude < -90 || payload.latitude > 90) {
+    return { ok: false as const, response: jsonError(400, "latitude must be a number between -90 and 90.") };
+  }
+
+  if (!isFiniteNumber(payload.longitude) || payload.longitude < -180 || payload.longitude > 180) {
+    return { ok: false as const, response: jsonError(400, "longitude must be a number between -180 and 180.") };
+  }
+
+  if (payload.accuracyMeters !== undefined && (!isFiniteNumber(payload.accuracyMeters) || payload.accuracyMeters < 0)) {
+    return { ok: false as const, response: jsonError(400, "accuracyMeters must be a non-negative number when provided.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      accuracyMeters: payload.accuracyMeters as number | undefined,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+    } satisfies DeviceLocationInput,
   };
 }
 
@@ -495,7 +546,7 @@ export function validateHeartbeatInput(input: unknown) {
   };
 }
 
-const ALLOWED_REMOTE_ACTIONS = new Set(["force_lock", "clear_local_usage", "sync_config"]);
+const ALLOWED_REMOTE_ACTIONS = new Set(["force_lock", "clear_local_usage", "sync_config", "capture_screenshot"]);
 
 export function validateRemoteActionCreateInput(input: unknown) {
   if (!input || typeof input !== "object") {
@@ -511,7 +562,10 @@ export function validateRemoteActionCreateInput(input: unknown) {
   }
 
   if (!actionType || !ALLOWED_REMOTE_ACTIONS.has(actionType)) {
-    return { ok: false as const, response: jsonError(400, "actionType must be one of: force_lock, clear_local_usage, sync_config.") };
+    return {
+      ok: false as const,
+      response: jsonError(400, "actionType must be one of: force_lock, clear_local_usage, sync_config, capture_screenshot."),
+    };
   }
 
   if (payload.deviceId !== undefined && normalizeRequiredString(payload.deviceId) === null) {
@@ -617,15 +671,95 @@ export function validateAdminSessionUpdateInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "status can only be set to revoked.") };
   }
 
+  if (payload.blockedPackages !== undefined) {
+    if (
+      !Array.isArray(payload.blockedPackages) ||
+      payload.blockedPackages.some((entry) => typeof entry !== "string" || entry.trim().length === 0)
+    ) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "blockedPackages must be an array of non-empty strings when provided."),
+      };
+    }
+  }
+
+  if (payload.blockedDomains !== undefined) {
+    if (
+      !Array.isArray(payload.blockedDomains) ||
+      payload.blockedDomains.some((entry) => typeof entry !== "string" || entry.trim().length === 0)
+    ) {
+      return {
+        ok: false as const,
+        response: jsonError(400, "blockedDomains must be an array of non-empty strings when provided."),
+      };
+    }
+  }
+
+  if (payload.contentFilterEnabled !== undefined && typeof payload.contentFilterEnabled !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "contentFilterEnabled must be a boolean when provided.") };
+  }
+
+  let weekdayOverrides: Record<string, WeekdayOverride> | undefined;
+
+  if (payload.weekdayOverrides !== undefined) {
+    if (typeof payload.weekdayOverrides !== "object" || payload.weekdayOverrides === null || Array.isArray(payload.weekdayOverrides)) {
+      return { ok: false as const, response: jsonError(400, "weekdayOverrides must be a JSON object when provided.") };
+    }
+
+    weekdayOverrides = {};
+
+    for (const [key, rawOverride] of Object.entries(payload.weekdayOverrides as Record<string, unknown>)) {
+      if (!WEEKDAY_KEYS.has(key)) {
+        return { ok: false as const, response: jsonError(400, `weekdayOverrides key "${key}" must be one of: mon, tue, wed, thu, fri, sat, sun.`) };
+      }
+
+      if (typeof rawOverride !== "object" || rawOverride === null || Array.isArray(rawOverride)) {
+        return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key} must be a JSON object.`) };
+      }
+
+      const override = rawOverride as Record<string, unknown>;
+      const parsedOverride: WeekdayOverride = {};
+
+      if (override.dailyLimitMinutes !== undefined) {
+        if (!isIntegerInRange(override.dailyLimitMinutes, 5, 90)) {
+          return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key}.dailyLimitMinutes must be an integer between 5 and 90.`) };
+        }
+        parsedOverride.dailyLimitMinutes = override.dailyLimitMinutes as number;
+      }
+
+      if (override.sleepStartTime !== undefined) {
+        const sleepStartTime = normalizeRequiredString(override.sleepStartTime);
+        if (!sleepStartTime || !TIME_VALUE_REGEX.test(sleepStartTime)) {
+          return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key}.sleepStartTime must use HH:mm format.`) };
+        }
+        parsedOverride.sleepStartTime = sleepStartTime;
+      }
+
+      if (override.sleepEndTime !== undefined) {
+        const sleepEndTime = normalizeRequiredString(override.sleepEndTime);
+        if (!sleepEndTime || !TIME_VALUE_REGEX.test(sleepEndTime)) {
+          return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key}.sleepEndTime must use HH:mm format.`) };
+        }
+        parsedOverride.sleepEndTime = sleepEndTime;
+      }
+
+      weekdayOverrides[key] = parsedOverride;
+    }
+  }
+
   return {
     ok: true as const,
     data: {
+      blockedDomains: (payload.blockedDomains as string[] | undefined)?.map((entry) => entry.trim().toLowerCase()),
+      blockedPackages: (payload.blockedPackages as string[] | undefined)?.map((entry) => entry.trim()),
+      contentFilterEnabled: payload.contentFilterEnabled as boolean | undefined,
       dailyLimitMinutes: payload.dailyLimitMinutes as number | undefined,
       endsAt: normalizeOptionalString(payload.endsAt) ?? undefined,
       extendDays: payload.extendDays as number | undefined,
       forcedSleepEnabled: payload.forcedSleepEnabled as boolean | undefined,
       sleepEndTime: normalizeOptionalString(payload.sleepEndTime) ?? undefined,
       sleepStartTime: normalizeOptionalString(payload.sleepStartTime) ?? undefined,
+      weekdayOverrides,
       status: (payload.status as "revoked" | undefined) ?? undefined,
     } satisfies AdminSessionUpdateInput,
   };

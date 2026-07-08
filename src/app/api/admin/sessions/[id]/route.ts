@@ -17,6 +17,9 @@ type RouteContext = {
 
 type SessionRow = {
   activated_at: string;
+  blocked_domains: string[];
+  blocked_packages: string[];
+  content_filter_enabled: boolean;
   config_version: number;
   daily_limit_minutes: number;
   device_id: string;
@@ -31,6 +34,7 @@ type SessionRow = {
   status: string;
   timezone: string | null;
   updated_at: string;
+  weekday_overrides: Record<string, unknown>;
 };
 
 function addDays(timestamp: string, days: number) {
@@ -42,6 +46,10 @@ function addDays(timestamp: string, days: number) {
 function formatSessionResponse(session: SessionRow) {
   return {
     activated_at: session.activated_at,
+    blocked_domains: session.blocked_domains,
+    blocked_packages: session.blocked_packages,
+    content_filter_enabled: session.content_filter_enabled,
+    weekday_overrides: session.weekday_overrides,
     config_version: session.config_version,
     daily_limit_minutes: session.daily_limit_minutes,
     device_id: session.device_id,
@@ -90,6 +98,22 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
     updatePayload.status = "revoked";
   }
 
+  if (input.blockedPackages !== undefined) {
+    updatePayload.blocked_packages = input.blockedPackages;
+  }
+
+  if (input.blockedDomains !== undefined) {
+    updatePayload.blocked_domains = input.blockedDomains;
+  }
+
+  if (input.contentFilterEnabled !== undefined) {
+    updatePayload.content_filter_enabled = input.contentFilterEnabled;
+  }
+
+  if (input.weekdayOverrides !== undefined) {
+    updatePayload.weekday_overrides = input.weekdayOverrides;
+  }
+
   return updatePayload;
 }
 
@@ -128,7 +152,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { data: session, error: loadError } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled",
     )
     .eq("id", id)
     .maybeSingle<SessionRow>();
@@ -161,7 +185,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .update(updatePayload)
     .eq("id", id)
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at",
+      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled",
     )
     .maybeSingle<SessionRow>();
 

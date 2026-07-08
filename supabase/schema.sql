@@ -99,6 +99,20 @@ alter table public.devices
 alter table public.devices
   add column if not exists sub_id uuid references public.subs(id) on delete cascade;
 
+-- Latest-known-location only (no history table) -- periodic background reports overwrite
+-- these each time, matching how last_seen_at already works for heartbeats.
+alter table public.devices
+  add column if not exists last_latitude double precision;
+
+alter table public.devices
+  add column if not exists last_longitude double precision;
+
+alter table public.devices
+  add column if not exists last_location_accuracy_m double precision;
+
+alter table public.devices
+  add column if not exists last_location_at timestamptz;
+
 create unique index if not exists devices_device_secret_hash_key
   on public.devices (device_secret_hash)
   where device_secret_hash is not null;
@@ -171,6 +185,27 @@ alter table public.sessions
 
 create index if not exists sessions_sub_id_idx
   on public.sessions (sub_id, created_at desc);
+
+-- Package names the keyholder blocks outright regardless of the daily-limit/sleep state --
+-- independent of (and in addition to) the whole-device lock.
+alter table public.sessions
+  add column if not exists blocked_packages jsonb not null default '[]'::jsonb;
+
+-- Sparse per-weekday overrides for daily_limit_minutes/sleep_start_time/sleep_end_time, e.g.
+-- {"sat": {"dailyLimitMinutes": 60}, "sun": {"dailyLimitMinutes": 60, "sleepStartTime": "23:30"}}.
+-- Keys are lowercase 3-letter weekday abbreviations (mon..sun); a day with no entry falls back
+-- to the session's own daily_limit_minutes/sleep_start_time/sleep_end_time.
+alter table public.sessions
+  add column if not exists weekday_overrides jsonb not null default '{}'::jsonb;
+
+-- Content filtering (VPN + DNS blocklist on the device) is opt-in from the sub's side even
+-- once the keyholder turns it on here -- Android requires a one-time local VPN consent
+-- dialog that can't be granted remotely.
+alter table public.sessions
+  add column if not exists content_filter_enabled boolean not null default false;
+
+alter table public.sessions
+  add column if not exists blocked_domains jsonb not null default '[]'::jsonb;
 
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
