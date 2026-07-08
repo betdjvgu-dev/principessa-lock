@@ -6,6 +6,7 @@ import {
   validateAdminSessionUpdateInput,
   type AdminSessionUpdateInput,
 } from "@/lib/server/request-validation";
+import { queueSyncConfigPush } from "@/lib/server/remote-action-dispatch";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -220,6 +221,16 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!updatedSession) {
     return jsonError(409, "Session could not be updated.");
   }
+
+  // Awaited (not fire-and-forget) since a serverless function isn't guaranteed to keep running
+  // background work after it returns a response. Without this, a rule change (daily limit,
+  // blocklist, forced sleep window, etc.) only reached the device on its own next periodic sync
+  // tick instead of immediately.
+  await queueSyncConfigPush(supabase, {
+    deviceId: updatedSession.device_id,
+    sessionId: updatedSession.id,
+    subId: null,
+  });
 
   return jsonOk({
     ok: true,

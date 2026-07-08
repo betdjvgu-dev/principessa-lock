@@ -10,11 +10,15 @@ type CreateSessionRequestRow = {
   status: string;
 };
 
-function buildInsertPayload(input: SessionRequestInput, deviceId: string, subId: string | null) {
+// device_name intentionally comes from the authenticated device row, not the client-supplied
+// input.deviceName -- the device's name is fixed at registration (unique, immutable), so trusting
+// a value re-typed in the session-request form would let a request claim a different name than
+// what's actually registered, with nothing tying the two together.
+function buildInsertPayload(input: SessionRequestInput, deviceId: string, deviceName: string, subId: string | null) {
   return {
     daily_limit_minutes: input.dailyLimitMinutes,
     device_id: deviceId,
-    device_name: input.deviceName,
+    device_name: deviceName,
     forced_sleep_enabled: input.forcedSleepEnabled,
     full_discretion: input.fullDiscretion,
     gallery_access_enabled: input.galleryAccessEnabled,
@@ -57,7 +61,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_requests")
-    .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.subId))
+    .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.deviceName, deviceAuth.device.subId))
     .select("id, status")
     .single<CreateSessionRequestRow>();
 

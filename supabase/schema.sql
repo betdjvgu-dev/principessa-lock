@@ -578,3 +578,88 @@ create trigger set_sessions_updated_at
 before update on public.sessions
 for each row
 execute function public.set_updated_at();
+
+-- Realtime + RLS for the desktop admin console. All existing REST routes use the service-role
+-- client (backend/src/lib/server/supabase-admin.ts), which always bypasses RLS regardless of
+-- whether it's enabled here -- so none of the routes above are affected by any of this. This is
+-- purely additive: it lets the desktop admin's Electron renderer open its own read-only Supabase
+-- Realtime subscription (see desktop-admin/src/lib/realtime.ts) instead of relying solely on
+-- 60-second REST polling to notice new session/unlock requests, messages, and device heartbeats.
+--
+-- There is exactly one keyholder identity in this whole product (single-admin model, enforced by
+-- ADMIN_EMAIL in backend/src/lib/server/admin-auth.ts) and no other flow ever mints a Supabase
+-- Auth JWT (devices authenticate with a separate bearer-secret scheme, not Supabase Auth) -- so
+-- "the request carries a valid Supabase Auth session" is already equivalent to "this is the
+-- keyholder." A plain `auth.role() = 'authenticated'` policy is therefore sufficient; there is no
+-- second identity for it to leak data to.
+alter table public.session_requests enable row level security;
+alter table public.app_unlock_requests enable row level security;
+alter table public.session_messages enable row level security;
+alter table public.device_heartbeats enable row level security;
+alter table public.device_remote_actions enable row level security;
+
+drop policy if exists admin_read_session_requests on public.session_requests;
+create policy admin_read_session_requests
+  on public.session_requests for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists admin_read_app_unlock_requests on public.app_unlock_requests;
+create policy admin_read_app_unlock_requests
+  on public.app_unlock_requests for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists admin_read_session_messages on public.session_messages;
+create policy admin_read_session_messages
+  on public.session_messages for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists admin_read_device_heartbeats on public.device_heartbeats;
+create policy admin_read_device_heartbeats
+  on public.device_heartbeats for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists admin_read_device_remote_actions on public.device_remote_actions;
+create policy admin_read_device_remote_actions
+  on public.device_remote_actions for select
+  using (auth.role() = 'authenticated');
+
+-- `alter publication ... add table` errors if the table is already a publication member, so this
+-- guards each one with an existence check to stay safely re-runnable (this file gets re-pasted
+-- into the Supabase SQL editor wholesale rather than run as incremental migrations).
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'session_requests'
+  ) then
+    alter publication supabase_realtime add table public.session_requests;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'app_unlock_requests'
+  ) then
+    alter publication supabase_realtime add table public.app_unlock_requests;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'session_messages'
+  ) then
+    alter publication supabase_realtime add table public.session_messages;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'device_heartbeats'
+  ) then
+    alter publication supabase_realtime add table public.device_heartbeats;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'device_remote_actions'
+  ) then
+    alter publication supabase_realtime add table public.device_remote_actions;
+  end if;
+end $$;

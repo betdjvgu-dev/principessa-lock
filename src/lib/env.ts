@@ -1,6 +1,7 @@
 import "server-only";
 
 type ServerEnv = {
+  SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   SUPABASE_URL: string;
 };
@@ -23,6 +24,7 @@ export function getServerEnv(): ServerEnv {
   }
 
   cachedEnv = {
+    SUPABASE_ANON_KEY: readRequiredEnv("SUPABASE_ANON_KEY"),
     SUPABASE_SERVICE_ROLE_KEY: readRequiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
     SUPABASE_URL: readRequiredEnv("SUPABASE_URL"),
   };

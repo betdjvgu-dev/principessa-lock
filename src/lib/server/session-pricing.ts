@@ -4,7 +4,7 @@ import "server-only";
 // This is the only server-side copy -- used to stamp sessions.price_usd once at pair/activate
 // time so the leaderboard has a trustworthy total instead of trusting a client-computed one.
 const BASE_PRICE_USD = 10;
-const PRICE_PER_DAY_USD = 1;
+const PRICE_PER_DAY_USD = 0.5;
 const FREE_DAILY_LIMIT_MINUTES = 60;
 const PRICE_PER_5_MINUTES_USD = 1;
 const GALLERY_ACCESS_PRICE_USD = 10;
