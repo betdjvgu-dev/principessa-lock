@@ -292,10 +292,13 @@ export function validateApproveSessionRequestInput(input: unknown) {
   }
 
   if (payload.dailyLimitMinutes !== undefined) {
-    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+    // Unlike validateSessionRequestInput (the sub-facing request form, still capped at 5-90),
+    // this is the keyholder setting real terms at approval time -- what matters is who's making
+    // the request, not a blanket cap, so this only enforces a sanity ceiling (24h).
+    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 1440)) {
       return {
         ok: false as const,
-        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90 when provided."),
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 1440 when provided."),
       };
     }
 
@@ -846,6 +849,7 @@ const ALLOWED_REMOTE_ACTIONS = new Set([
   "capture_screenshot",
   "set_wallpaper",
   "capture_gallery",
+  "clear_persistence_penalty",
 ]);
 
 export function validateRemoteActionCreateInput(input: unknown) {
@@ -866,7 +870,7 @@ export function validateRemoteActionCreateInput(input: unknown) {
       ok: false as const,
       response: jsonError(
         400,
-        "actionType must be one of: force_lock, clear_local_usage, sync_config, capture_screenshot, set_wallpaper, capture_gallery.",
+        "actionType must be one of: force_lock, clear_local_usage, sync_config, capture_screenshot, set_wallpaper, capture_gallery, clear_persistence_penalty.",
       ),
     };
   }
@@ -930,10 +934,12 @@ export function validateAdminSessionUpdateInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "At least one session field must be provided.") };
   }
 
-  if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+  // Admin-facing (desktop "Save Config") -- only a sanity ceiling (24h), not the sub-facing
+  // request form's 5-90 cap. What matters is who's making the request, not a blanket limit.
+  if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 1440)) {
     return {
       ok: false as const,
-      response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
+      response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 1440."),
     };
   }
 
@@ -1046,8 +1052,8 @@ export function validateAdminSessionUpdateInput(input: unknown) {
       const parsedOverride: WeekdayOverride = {};
 
       if (override.dailyLimitMinutes !== undefined) {
-        if (!isIntegerInRange(override.dailyLimitMinutes, 5, 90)) {
-          return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key}.dailyLimitMinutes must be an integer between 5 and 90.`) };
+        if (!isIntegerInRange(override.dailyLimitMinutes, 5, 1440)) {
+          return { ok: false as const, response: jsonError(400, `weekdayOverrides.${key}.dailyLimitMinutes must be an integer between 5 and 1440.`) };
         }
         parsedOverride.dailyLimitMinutes = override.dailyLimitMinutes as number;
       }

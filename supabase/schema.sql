@@ -32,6 +32,17 @@ create table if not exists public.session_requests (
     check (daily_limit_minutes between 5 and 90)
 );
 
+-- Widened from the original 5-90 so the keyholder can set real terms above 90 minutes when
+-- approving a full_discretion request (see validateApproveSessionRequestInput in
+-- request-validation.ts) -- the sub-facing request form itself (validateSessionRequestInput)
+-- still enforces its own 5-90 cap in application code regardless of what the DB allows here.
+alter table public.session_requests
+  drop constraint if exists session_requests_daily_limit_minutes_check;
+
+alter table public.session_requests
+  add constraint session_requests_daily_limit_minutes_check
+  check (daily_limit_minutes between 5 and 1440);
+
 -- Opt-in, paid add-on chosen by the sub at request time (see pricing.ts/SessionPricing.kt
 -- for the surcharge) -- on-demand only, no automatic scanning/classification of photos.
 alter table public.session_requests
@@ -206,6 +217,17 @@ create table if not exists public.sessions (
   constraint sessions_request_id_unique
     unique (request_id)
 );
+
+-- Widened from the original 5-90 so the keyholder can set a daily limit above 90 minutes via
+-- the desktop admin's "Save Config" (see validateAdminSessionUpdateInput in
+-- request-validation.ts) -- what matters for this cap is who's making the request, not a
+-- blanket limit; the sub-facing session-request form still enforces its own 5-90 cap.
+alter table public.sessions
+  drop constraint if exists sessions_daily_limit_minutes_check;
+
+alter table public.sessions
+  add constraint sessions_daily_limit_minutes_check
+  check (daily_limit_minutes between 5 and 1440);
 
 create index if not exists sessions_device_id_idx
   on public.sessions (device_id, created_at desc);
@@ -550,7 +572,7 @@ alter table public.device_remote_actions
 
 alter table public.device_remote_actions
   add constraint device_remote_actions_action_type_check
-  check (action_type in ('force_lock', 'clear_local_usage', 'sync_config', 'capture_screenshot', 'set_wallpaper', 'capture_gallery'));
+  check (action_type in ('force_lock', 'clear_local_usage', 'sync_config', 'capture_screenshot', 'set_wallpaper', 'capture_gallery', 'clear_persistence_penalty'));
 
 create index if not exists device_remote_actions_session_status_requested_idx
   on public.device_remote_actions (session_id, status, requested_at asc);
