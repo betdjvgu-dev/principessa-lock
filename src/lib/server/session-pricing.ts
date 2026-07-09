@@ -14,7 +14,7 @@ const GALLERY_ACCESS_PRICE_USD = 10;
 // principessa-lock/.../SessionPricing.kt) before the keyholder ever sets real terms, so the
 // stored price (and therefore the leaderboard total) must never come out under it regardless
 // of how cheap the terms the keyholder ends up choosing are.
-export const FULL_DISCRETION_MINIMUM_PRICE_USD = 50;
+export const FULL_DISCRETION_MINIMUM_PRICE_USD = 30;
 
 export function calculateSessionPriceUsd(
   sessionDays: number,
