@@ -55,10 +55,9 @@ curl -X POST http://localhost:3000/api/admin/session-requests/REQUEST_ID/approve
 Expected result:
 
 - HTTP 200
-- one plaintext `activationCode` is returned
 - request status becomes `approved`
-
-Save the returned activation code because it is not stored in plaintext.
+- no activation code is returned -- there isn't one anymore. The device activates with its own
+  bearer token (see step 5).
 
 ## 4. Reject a pending request
 
@@ -76,12 +75,14 @@ Expected result:
 
 ## 5. Activate an approved request
 
-Use the activation code returned by the approve endpoint.
+No code needed -- the device's own bearer token (its device secret, same one used for
+`/api/session-requests`) already identifies which approved request to activate.
 
 ```bash
 curl -X POST http://localhost:3000/api/activate ^
+  -H "Authorization: Bearer DEVICE_SECRET" ^
   -H "Content-Type: application/json" ^
-  -d "{\"activationCode\":\"PRIN-ABCD-1234\",\"deviceName\":\"Test Phone\",\"timezone\":\"Europe/Istanbul\"}"
+  -d "{\"timezone\":\"Europe/Istanbul\"}"
 ```
 
 Expected result:
@@ -130,18 +131,19 @@ Expected result:
 - HTTP 401
 - JSON error response
 
-### Invalid activation code
+### No approved request
 
-Submit a fake code to `/api/activate`.
+Call `/api/activate` for a device with no approved request (e.g. still pending, or none at all).
 
 Expected result:
 
 - HTTP 404
 - JSON error response
 
-### Expired activation code
+### Expired approval
 
-Manually set `activation_code_expires_at` to a past timestamp in Supabase and call `/api/activate`.
+Manually set `activation_code_expires_at` (the approval-expiry column; name is a holdover from
+the old code-based flow) to a past timestamp in Supabase and call `/api/activate`.
 
 Expected result:
 
@@ -150,7 +152,7 @@ Expected result:
 
 ### Double activation
 
-Call `/api/activate` twice with the same activation code.
+Call `/api/activate` twice in a row for the same device/request.
 
 Expected result:
 

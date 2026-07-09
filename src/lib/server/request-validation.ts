@@ -16,9 +16,7 @@ export type ApproveSessionRequestInput = {
   sessionDays?: number;
 };
 
-export type ActivationInput = {
-  activationCode: string;
-  deviceName: string;
+export type ActivateInput = {
   timezone?: string;
 };
 
@@ -558,22 +556,12 @@ export function validateSettingsPinInput(input: unknown) {
   };
 }
 
-export function validateActivationInput(input: unknown) {
-  if (!input || typeof input !== "object") {
+export function validateActivateInput(input: unknown) {
+  if (input !== undefined && (!input || typeof input !== "object")) {
     return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
   }
 
-  const payload = input as Record<string, unknown>;
-  const activationCode = normalizeRequiredString(payload.activationCode);
-  const deviceName = normalizeRequiredString(payload.deviceName);
-
-  if (!activationCode) {
-    return { ok: false as const, response: jsonError(400, "activationCode is required.") };
-  }
-
-  if (!deviceName) {
-    return { ok: false as const, response: jsonError(400, "deviceName is required.") };
-  }
+  const payload = (input ?? {}) as Record<string, unknown>;
 
   if (payload.timezone !== undefined && normalizeRequiredString(payload.timezone) === null) {
     return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
@@ -582,10 +570,8 @@ export function validateActivationInput(input: unknown) {
   return {
     ok: true as const,
     data: {
-      activationCode,
-      deviceName,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
-    } satisfies ActivationInput,
+    } satisfies ActivateInput,
   };
 }
 

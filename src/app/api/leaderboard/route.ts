@@ -4,8 +4,8 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
-type SessionPriceRow = {
-  price_usd: number | null;
+type SessionDaysRow = {
+  session_days: number | null;
   sub_id: string | null;
   subs: { username: string | null } | null;
 };
@@ -32,15 +32,17 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from("sessions")
-    .select("sub_id, price_usd, subs(username)")
-    .returns<SessionPriceRow[]>();
+    .select("sub_id, session_days, subs(username)")
+    .returns<SessionDaysRow[]>();
 
   if (error) {
     return jsonSupabaseError("Failed to load leaderboard.", error);
   }
 
+  // Ranked by total days spent locked across all of a sub's activated sessions -- not dollars,
+  // since session length/limit are free now and only a couple of opt-in extras cost anything.
   // Only subs who have set a username show up -- there's nothing to rank them by/as otherwise.
-  const totalsBySubId = new Map<string, { totalUsd: number; username: string }>();
+  const totalsBySubId = new Map<string, { totalDaysLocked: number; username: string }>();
 
   for (const row of data ?? []) {
     const username = row.subs?.username;
@@ -49,23 +51,23 @@ export async function GET(request: Request) {
       continue;
     }
 
-    const priceUsd = row.price_usd ?? 0;
+    const sessionDays = row.session_days ?? 0;
     const existing = totalsBySubId.get(row.sub_id);
 
     if (existing) {
-      existing.totalUsd += priceUsd;
+      existing.totalDaysLocked += sessionDays;
     } else {
-      totalsBySubId.set(row.sub_id, { totalUsd: priceUsd, username });
+      totalsBySubId.set(row.sub_id, { totalDaysLocked: sessionDays, username });
     }
   }
 
   const entries = Array.from(totalsBySubId.entries())
-    .map(([subId, entry]) => ({ subId, totalTributeUsd: entry.totalUsd, username: entry.username }))
-    .sort((left, right) => right.totalTributeUsd - left.totalTributeUsd)
+    .map(([subId, entry]) => ({ subId, totalDaysLocked: entry.totalDaysLocked, username: entry.username }))
+    .sort((left, right) => right.totalDaysLocked - left.totalDaysLocked)
     .map((entry, index) => ({
       isYou: entry.subId === deviceAuth.device.subId,
       rank: index + 1,
-      totalTributeUsd: entry.totalTributeUsd,
+      totalDaysLocked: entry.totalDaysLocked,
       username: entry.username,
     }));
 

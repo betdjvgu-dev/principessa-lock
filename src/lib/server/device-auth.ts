@@ -13,7 +13,16 @@ type DeviceAuthRow = {
   device_secret_hash: string | null;
   id: string;
   sub_id: string | null;
+  subs: { status: string } | { status: string }[] | null;
 };
+
+function extractSubStatus(value: DeviceAuthRow["subs"]) {
+  if (Array.isArray(value)) {
+    return value[0]?.status ?? null;
+  }
+
+  return value?.status ?? null;
+}
 
 type SessionOwnershipRow = {
   device_id: string;
@@ -65,6 +74,7 @@ export function hashDeviceSecret(deviceSecret: string) {
 export async function requireAuthenticatedDevice(
   request: Request,
   suppliedSupabase?: SupabaseAdminClient,
+  options?: { allowPendingSub?: boolean },
 ): Promise<DeviceAuthSuccess | DeviceAuthFailure> {
   const deviceSecret = extractBearerToken(request.headers.get("authorization"));
 
@@ -78,7 +88,7 @@ export async function requireAuthenticatedDevice(
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
   const { data: device, error } = await supabase
     .from("devices")
-    .select("id, device_name, device_secret_hash, sub_id")
+    .select("id, device_name, device_secret_hash, sub_id, subs(status)")
     .eq("device_secret_hash", hashDeviceSecret(deviceSecret))
     .maybeSingle<DeviceAuthRow>();
 
@@ -93,6 +103,21 @@ export async function requireAuthenticatedDevice(
     return {
       ok: false,
       response: jsonError(401, "Invalid device bearer token."),
+    };
+  }
+
+  // Registration now requires keyholder approval (subs.status starts "invited") before the
+  // device can do anything functional -- everything except the registration-status check itself
+  // (which passes allowPendingSub) is locked out until the keyholder approves.
+  const subStatus = extractSubStatus(device.subs);
+
+  if (!options?.allowPendingSub && subStatus !== null && subStatus !== "active") {
+    return {
+      ok: false,
+      response:
+        subStatus === "invited"
+          ? jsonError(403, "Registration is pending keyholder approval.")
+          : jsonError(403, "Registration was not approved."),
     };
   }
 

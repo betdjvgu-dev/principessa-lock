@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  validateActivationInput,
+  validateActivateInput,
   validateAdminSessionUpdateInput,
   validateFcmTokenInput,
   validateRegisterInput,
@@ -49,19 +49,19 @@ describe("validateSessionRequestInput", () => {
   });
 });
 
-describe("validateActivationInput", () => {
-  it("accepts a well-formed payload", () => {
-    const result = validateActivationInput({ activationCode: "AUPQ-8T27-M4KX-2Q7Z", deviceName: "Pixel 7" });
+describe("validateActivateInput", () => {
+  it("accepts an empty payload", () => {
+    const result = validateActivateInput(undefined);
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a missing activationCode", () => {
-    const result = validateActivationInput({ deviceName: "Pixel 7" });
-    expect(result.ok).toBe(false);
+  it("accepts a payload with a timezone", () => {
+    const result = validateActivateInput({ timezone: "Europe/Istanbul" });
+    expect(result.ok).toBe(true);
   });
 
   it("rejects a blank timezone when provided", () => {
-    const result = validateActivationInput({ activationCode: "X", deviceName: "Y", timezone: "   " });
+    const result = validateActivateInput({ timezone: "   " });
     expect(result.ok).toBe(false);
   });
 });
@@ -164,7 +164,7 @@ describe("validateAdminSessionUpdateInput", () => {
     });
 
     it("rejects an out-of-range dailyLimitMinutes override", () => {
-      const result = validateAdminSessionUpdateInput({ weekdayOverrides: { mon: { dailyLimitMinutes: 200 } } });
+      const result = validateAdminSessionUpdateInput({ weekdayOverrides: { mon: { dailyLimitMinutes: 1500 } } });
       expect(result.ok).toBe(false);
     });
 

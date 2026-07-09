@@ -10,6 +10,11 @@ type CreateSessionRequestRow = {
   status: string;
 };
 
+type OwnRequestStatusRow = {
+  id: string;
+  status: string;
+};
+
 // device_name intentionally comes from the authenticated device row, not the client-supplied
 // input.deviceName -- the device's name is fixed at registration (unique, immutable), so trusting
 // a value re-typed in the session-request form would let a request claim a different name than
@@ -81,6 +86,42 @@ export async function POST(request: Request) {
   );
 }
 
-export function GET() {
-  return jsonError(405, "Method not allowed.");
+// No activation code to relay out-of-band anymore -- the Android app polls this while a request
+// is pending/approved so it knows the moment it can show the one-tap "Activate" button.
+export async function GET(request: Request) {
+  const rateLimitError = await enforceRateLimit({
+    errorMessage: "Too many status checks. Please wait before trying again.",
+    limit: 60,
+    request,
+    routeKey: "session-requests:status",
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  const deviceAuth = await requireAuthenticatedDevice(request);
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("session_requests")
+    .select("id, status")
+    .eq("device_id", deviceAuth.device.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<OwnRequestStatusRow>();
+
+  if (error) {
+    return jsonSupabaseError("Failed to load session request status.", error);
+  }
+
+  return jsonOk({
+    ok: true,
+    request: data ? { id: data.id, status: data.status } : null,
+  });
 }

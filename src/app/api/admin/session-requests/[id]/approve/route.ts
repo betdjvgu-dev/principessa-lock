@@ -4,7 +4,7 @@ import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateApproveSessionRequestInput, type ApproveSessionRequestInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
-import { generateUniqueActivationCode, type SessionRequestRow } from "@/lib/server/session-flow";
+import { type SessionRequestRow } from "@/lib/server/session-flow";
 
 type RouteContext = {
   params: Promise<{
@@ -87,18 +87,10 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 
-  let uniqueCode: { activationCode: string; activationCodeHash: string };
-
-  try {
-    uniqueCode = await generateUniqueActivationCode(supabase);
-  } catch (error) {
-    if (error instanceof Error) {
-      return jsonError(500, error.message);
-    }
-
-    return jsonError(500, "Failed to generate a unique activation code.");
-  }
-
+  // Approved requests stay activatable for 7 days -- if the sub never taps "Activate" in that
+  // window, the request auto-expires instead of sitting around indefinitely. This reuses the
+  // activation_code_expires_at column from the old code-based flow to avoid a schema migration;
+  // it's just a generic "approval expires at" timestamp now.
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const approvedAt = new Date().toISOString();
 
@@ -106,7 +98,6 @@ export async function POST(request: Request, context: RouteContext) {
     .from("session_requests")
     .update({
       activation_code_expires_at: expiresAt,
-      activation_code_hash: uniqueCode.activationCodeHash,
       approved_at: approvedAt,
       rejected_at: null,
       status: "approved",
@@ -126,7 +117,6 @@ export async function POST(request: Request, context: RouteContext) {
 
   return jsonOk({
     ok: true,
-    activationCode: uniqueCode.activationCode,
     request: {
       id: updatedRequest.id,
       status: updatedRequest.status,

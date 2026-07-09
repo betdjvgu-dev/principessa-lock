@@ -1,10 +1,11 @@
 import "server-only";
 
-import { generateActivationCode, hashActivationCode } from "@/lib/server/activation-codes";
-
 export type SessionRequestRow = {
+  // Column name is a holdover from the old activation-code system (there's no code anymore --
+  // approval just moves status to "approved" and the sub activates with a single tap), but it's
+  // reused as-is to avoid a schema migration. It still means the same thing: how long an
+  // approval stays valid before the request auto-expires if never activated.
   activation_code_expires_at: string | null;
-  activation_code_hash: string | null;
   activated_at: string | null;
   approved_at: string | null;
   created_at: string;
@@ -21,30 +22,3 @@ export type SessionRequestRow = {
   sub_id: string | null;
   updated_at: string;
 };
-
-export async function generateUniqueActivationCode(
-  supabase: any,
-) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const activationCode = generateActivationCode();
-    const activationCodeHash = hashActivationCode(activationCode);
-    const { data, error } = await supabase
-      .from("session_requests")
-      .select("id")
-      .eq("activation_code_hash", activationCodeHash)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      return {
-        activationCode,
-        activationCodeHash,
-      };
-    }
-  }
-
-  throw new Error("Unable to generate a unique activation code.");
-}

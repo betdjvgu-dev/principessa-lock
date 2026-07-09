@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
-import { generateDeviceSecret, hashDeviceSecret } from "@/lib/server/device-auth";
+import { generateDeviceSecret, hashDeviceSecret, requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateRegisterInput, type RegisterInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -7,6 +7,10 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
 type CreatedSubRow = {
   id: string;
+};
+
+type SubStatusRow = {
+  status: string;
 };
 
 export async function POST(request: Request) {
@@ -40,9 +44,11 @@ export async function POST(request: Request) {
   // No admin-issued code -- the sub picks a username directly, and both the username and the
   // device name are globally unique going forward (enforced by the case-insensitive unique
   // indexes on subs.username / devices.device_name), so neither can be claimed again once used.
+  // Status defaults to "invited" -- the keyholder still has to approve the registration before
+  // the device can do anything functional (see requireAuthenticatedDevice's gating).
   const { data: sub, error: subError } = await supabase
     .from("subs")
-    .insert({ label: username, status: "active", username })
+    .insert({ label: username, username })
     .select("id")
     .single<CreatedSubRow>();
 
@@ -92,4 +98,43 @@ export async function POST(request: Request) {
     },
     { status: 201 },
   );
+}
+
+// Polled while a registration is awaiting keyholder approval -- allowPendingSub lets this one
+// succeed even though every other device-authenticated route rejects a pending/archived sub.
+export async function GET(request: Request) {
+  const rateLimitError = await enforceRateLimit({
+    errorMessage: "Too many status checks. Please wait before trying again.",
+    limit: 60,
+    request,
+    routeKey: "register:status",
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase, { allowPendingSub: true });
+
+  if (!deviceAuth.ok) {
+    return deviceAuth.response;
+  }
+
+  if (!deviceAuth.device.subId) {
+    return jsonOk({ ok: true, status: "active" });
+  }
+
+  const { data, error } = await supabase
+    .from("subs")
+    .select("status")
+    .eq("id", deviceAuth.device.subId)
+    .maybeSingle<SubStatusRow>();
+
+  if (error) {
+    return jsonSupabaseError("Failed to load registration status.", error);
+  }
+
+  return jsonOk({ ok: true, status: data?.status ?? "active" });
 }

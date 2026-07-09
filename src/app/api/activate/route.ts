@@ -1,9 +1,8 @@
-import { hashActivationCode } from "@/lib/server/activation-codes";
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
-import { readJsonBody, validateActivationInput, type ActivationInput } from "@/lib/server/request-validation";
-import { calculateSessionPriceUsd, FULL_DISCRETION_MINIMUM_PRICE_USD } from "@/lib/server/session-pricing";
+import { readJsonBody, validateActivateInput, type ActivateInput } from "@/lib/server/request-validation";
+import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
@@ -32,6 +31,9 @@ function addDays(timestamp: Date, days: number) {
   return next;
 }
 
+// No activation code anymore -- the device is already proven by its device-secret bearer token
+// (requireAuthenticatedDevice), so activating just means "create a session from my own most
+// recent approved request." One tap in the Android app, no code to type or copy.
 export async function POST(request: Request) {
   const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many activation attempts. Please wait before trying again.",
@@ -51,66 +53,44 @@ export async function POST(request: Request) {
     return deviceAuth.response;
   }
 
-  const bodyResult = await readJsonBody<ActivationInput>(request);
+  const bodyResult = await readJsonBody<ActivateInput>(request);
 
   if (!bodyResult.ok) {
     return bodyResult.response;
   }
 
-  const validation = validateActivationInput(bodyResult.data);
+  const validation = validateActivateInput(bodyResult.data);
 
   if (!validation.ok) {
     return validation.response;
   }
 
   const supabase = getSupabaseAdminClient();
-  const activationCodeHash = hashActivationCode(validation.data.activationCode);
   const { data: sessionRequest, error: loadError } = await supabase
     .from("session_requests")
     .select("*")
-    .eq("activation_code_hash", activationCodeHash)
+    .eq("device_id", deviceAuth.device.id)
+    .eq("status", "approved")
+    .order("approved_at", { ascending: false })
+    .limit(1)
     .maybeSingle<SessionRequestRow>();
 
   if (loadError) {
-    return jsonSupabaseError("Failed to load activation request.", loadError);
+    return jsonSupabaseError("Failed to load approved session request.", loadError);
   }
 
   if (!sessionRequest) {
-    return jsonError(404, "Invalid activation code.");
-  }
-
-  if (sessionRequest.device_id !== deviceAuth.device.id) {
-    return jsonError(403, "This activation code was not requested by this device.");
-  }
-
-  if (sessionRequest.status === "activated") {
-    return jsonError(409, "Activation code has already been used.");
-  }
-
-  if (sessionRequest.status === "expired") {
-    return jsonError(410, "Activation code has expired.");
-  }
-
-  if (sessionRequest.status === "rejected") {
-    return jsonError(409, "Activation request was rejected.");
-  }
-
-  if (sessionRequest.status === "pending") {
-    return jsonError(409, "Activation code is not approved yet.");
-  }
-
-  if (sessionRequest.status !== "approved") {
-    return jsonError(409, `Activation code is not usable because the request is ${sessionRequest.status}.`);
+    return jsonError(404, "No approved session request is waiting to be activated.");
   }
 
   if (!sessionRequest.activation_code_expires_at) {
-    return jsonError(500, "Approved request is missing activation expiry.");
+    return jsonError(500, "Approved request is missing an approval expiry.");
   }
 
   const expiresAt = new Date(sessionRequest.activation_code_expires_at);
 
   if (Number.isNaN(expiresAt.getTime())) {
-    return jsonError(500, "Stored activation expiry is invalid.");
+    return jsonError(500, "Stored approval expiry is invalid.");
   }
 
   if (expiresAt.getTime() <= Date.now()) {
@@ -124,7 +104,7 @@ export async function POST(request: Request) {
       return jsonSupabaseError("Failed to expire session request.", expireError);
     }
 
-    return jsonError(410, "Activation code has expired.");
+    return jsonError(410, "Approval has expired. Ask your keyholder to approve a new request.");
   }
 
   if (validation.data.timezone) {
@@ -147,20 +127,7 @@ export async function POST(request: Request) {
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
       gallery_access_enabled: sessionRequest.gallery_access_enabled,
-      price_usd: sessionRequest.full_discretion
-        ? Math.max(
-            calculateSessionPriceUsd(
-              sessionRequest.requested_days,
-              sessionRequest.daily_limit_minutes,
-              sessionRequest.gallery_access_enabled,
-            ),
-            FULL_DISCRETION_MINIMUM_PRICE_USD,
-          )
-        : calculateSessionPriceUsd(
-            sessionRequest.requested_days,
-            sessionRequest.daily_limit_minutes,
-            sessionRequest.gallery_access_enabled,
-          ),
+      price_usd: calculateSessionPriceUsd(sessionRequest.full_discretion, sessionRequest.gallery_access_enabled),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
       sleep_end_time: "07:00",
@@ -175,7 +142,7 @@ export async function POST(request: Request) {
 
   if (sessionError) {
     if (sessionError.code === "23505") {
-      return jsonError(409, "Activation code has already been used.");
+      return jsonError(409, "This request has already been activated.");
     }
 
     return jsonSupabaseError("Failed to create session.", sessionError);
