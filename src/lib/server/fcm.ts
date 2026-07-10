@@ -77,3 +77,17 @@ export async function sendNewMessagePush(fcmToken: string | null | undefined) {
 export async function sendRegistrationApprovedPush(fcmToken: string | null | undefined) {
   await sendDataPush(fcmToken, { type: "registration_approved" });
 }
+
+/** Wakes the keyholder's own device (whichever one she's logged into the in-app admin console
+ *  on) to notify her of a new session request immediately, instead of her only finding out
+ *  whenever she happens to open the admin console on her own. */
+export async function sendNewSessionRequestPush(fcmToken: string | null | undefined) {
+  await sendDataPush(fcmToken, { type: "new_session_request" });
+}
+
+/** Wakes a sub's device to check for (and notify) an approved/rejected session request
+ *  immediately -- without this, a sub only found out once they happened to reopen the app while
+ *  it polled on its own (which could take minutes if the app was backgrounded). */
+export async function sendSessionRequestDecisionPush(fcmToken: string | null | undefined) {
+  await sendDataPush(fcmToken, { type: "session_request_decided" });
+}

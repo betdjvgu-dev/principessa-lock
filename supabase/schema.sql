@@ -612,6 +612,16 @@ create index if not exists device_remote_actions_device_status_requested_idx
 create index if not exists device_remote_actions_sub_id_requested_idx
   on public.device_remote_actions (sub_id, status, requested_at asc);
 
+-- FCM token for the single keyholder identity, registered from whichever physical Android
+-- device she's logged into the in-app admin console on -- lets the backend push a notification
+-- to *that* device the moment a new session request comes in, instead of her only finding out
+-- whenever she happens to open the admin console. Single-admin model, so at most one row.
+create table if not exists public.admin_push_tokens (
+  admin_user_id uuid primary key,
+  fcm_token text not null,
+  updated_at timestamptz not null default now()
+);
+
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at
 before update on public.session_requests

@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { sendSessionRequestDecisionPush } from "@/lib/server/fcm";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -68,6 +69,16 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (!updatedRequest) {
     return jsonError(409, "Session request is no longer pending.");
+  }
+
+  if (sessionRequest.device_id) {
+    const { data: device } = await supabase
+      .from("devices")
+      .select("fcm_token")
+      .eq("id", sessionRequest.device_id)
+      .maybeSingle<{ fcm_token: string | null }>();
+
+    await sendSessionRequestDecisionPush(device?.fcm_token);
   }
 
   return jsonOk({

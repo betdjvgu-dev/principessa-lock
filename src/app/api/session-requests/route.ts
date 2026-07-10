@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
+import { sendNewSessionRequestPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { validateSessionRequestInput, readJsonBody, type SessionRequestInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -73,6 +74,15 @@ export async function POST(request: Request) {
   if (error) {
     return jsonSupabaseError("Failed to create session request.", error);
   }
+
+  // Single-admin model -- there is at most one row in admin_push_tokens, for whichever
+  // physical device the keyholder is currently logged into the in-app admin console on.
+  const { data: adminToken } = await supabase
+    .from("admin_push_tokens")
+    .select("fcm_token")
+    .maybeSingle<{ fcm_token: string | null }>();
+
+  await sendNewSessionRequestPush(adminToken?.fcm_token);
 
   return jsonOk(
     {
