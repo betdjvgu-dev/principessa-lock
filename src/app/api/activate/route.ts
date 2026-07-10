@@ -31,6 +31,44 @@ function addDays(timestamp: Date, days: number) {
   return next;
 }
 
+function normalizeTimestamp(value: string) {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
+}
+
+function sessionResponse(deviceId: string, session: SessionRow) {
+  const startsAt = normalizeTimestamp(session.starts_at);
+  const endsAt = normalizeTimestamp(session.ends_at);
+  const updatedAt = normalizeTimestamp(session.updated_at);
+  const activatedAt = normalizeTimestamp(session.activated_at);
+
+  if (!startsAt || !endsAt || !updatedAt || !activatedAt) {
+    return jsonError(500, "Stored session timestamps are invalid.");
+  }
+
+  return jsonOk({
+    device: { id: deviceId },
+    ok: true,
+    session: {
+      id: session.id,
+      deviceId: session.device_id,
+      sessionDays: session.session_days,
+      dailyLimitMinutes: session.daily_limit_minutes,
+      forcedSleepEnabled: session.forced_sleep_enabled,
+      galleryAccessEnabled: session.gallery_access_enabled,
+      configVersion: session.config_version,
+      sleepEndTime: session.sleep_end_time,
+      sleepStartTime: session.sleep_start_time,
+      timezone: session.timezone,
+      startsAt,
+      endsAt,
+      status: session.status,
+      updatedAt,
+      activatedAt,
+    },
+  });
+}
+
 // No activation code anymore -- the device is already proven by its device-secret bearer token
 // (requireAuthenticatedDevice), so activating just means "create a session from my own most
 // recent approved request." One tap in the Android app, no code to type or copy.
@@ -86,7 +124,7 @@ export async function POST(request: Request) {
     // mid-request, etc.), so the device retried and now finds nothing "approved" left. Rather
     // than erroring a device that's actually already active, hand back its existing active
     // session so a retry is self-healing instead of stranding the sub on an error screen forever.
-    const { data: existingSession } = await supabase
+    const { data: existingSession, error: existingSessionError } = await supabase
       .from("sessions")
       .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
       .eq("device_id", deviceAuth.device.id)
@@ -95,30 +133,47 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle<SessionRow>();
 
+    if (existingSessionError) {
+      return jsonSupabaseError("Failed to recover the active session.", existingSessionError);
+    }
+
     if (existingSession) {
-      return jsonOk({
-        device: { id: deviceAuth.device.id },
-        ok: true,
-        session: {
-          id: existingSession.id,
-          deviceId: existingSession.device_id,
-          sessionDays: existingSession.session_days,
-          dailyLimitMinutes: existingSession.daily_limit_minutes,
-          forcedSleepEnabled: existingSession.forced_sleep_enabled,
-          configVersion: existingSession.config_version,
-          sleepEndTime: existingSession.sleep_end_time,
-          sleepStartTime: existingSession.sleep_start_time,
-          timezone: existingSession.timezone,
-          startsAt: existingSession.starts_at,
-          endsAt: existingSession.ends_at,
-          status: existingSession.status,
-          updatedAt: existingSession.updated_at,
-          activatedAt: existingSession.activated_at,
-        },
-      });
+      return sessionResponse(deviceAuth.device.id, existingSession);
     }
 
     return jsonError(404, "No approved session request is waiting to be activated.");
+  }
+
+  // A session may already exist even while its request still says "approved" if the previous
+  // activation created the session but the follow-up request update or HTTP response failed.
+  // Recover that row before checking approval expiry or attempting another insert.
+  const { data: sessionForRequest, error: sessionForRequestError } = await supabase
+    .from("sessions")
+    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+    .eq("request_id", sessionRequest.id)
+    .eq("device_id", deviceAuth.device.id)
+    .eq("status", "active")
+    .maybeSingle<SessionRow>();
+
+  if (sessionForRequestError) {
+    return jsonSupabaseError("Failed to check the existing session.", sessionForRequestError);
+  }
+
+  if (sessionForRequest) {
+    const { error: repairError } = await supabase
+      .from("session_requests")
+      .update({
+        activated_at: sessionForRequest.activated_at,
+        status: "activated",
+      })
+      .eq("id", sessionRequest.id)
+      .eq("status", "approved");
+
+    if (repairError) {
+      console.error("Existing session was recovered but its request status could not be repaired.", repairError);
+    }
+
+    return sessionResponse(deviceAuth.device.id, sessionForRequest);
   }
 
   if (!sessionRequest.activation_code_expires_at) {
@@ -184,7 +239,23 @@ export async function POST(request: Request) {
 
   if (sessionError) {
     if (sessionError.code === "23505") {
-      return jsonError(409, "This request has already been activated.");
+      const { data: concurrentSession, error: concurrentSessionError } = await supabase
+        .from("sessions")
+        .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+        .eq("request_id", sessionRequest.id)
+        .eq("device_id", deviceAuth.device.id)
+        .eq("status", "active")
+        .maybeSingle<SessionRow>();
+
+      if (concurrentSessionError) {
+        return jsonSupabaseError("Failed to recover the concurrently activated session.", concurrentSessionError);
+      }
+
+      if (concurrentSession) {
+        return sessionResponse(deviceAuth.device.id, concurrentSession);
+      }
+
+      return jsonError(409, "This request has already been activated, but its session could not be recovered.");
     }
 
     return jsonSupabaseError("Failed to create session.", sessionError);
@@ -204,29 +275,11 @@ export async function POST(request: Request) {
     .eq("status", "approved");
 
   if (updateError) {
-    return jsonSupabaseError("Session was created but the request status update failed.", updateError);
+    // The session is already authoritative and usable. Returning it prevents a transient request
+    // status update failure from stranding the Android client; the next activation retry repairs
+    // the request through the sessionForRequest branch above.
+    console.error("Session was created but the request status update failed.", updateError);
   }
 
-  return jsonOk({
-    device: {
-      id: deviceAuth.device.id,
-    },
-    ok: true,
-    session: {
-      id: session.id,
-      deviceId: session.device_id,
-      sessionDays: session.session_days,
-      dailyLimitMinutes: session.daily_limit_minutes,
-      forcedSleepEnabled: session.forced_sleep_enabled,
-      configVersion: session.config_version,
-      sleepEndTime: session.sleep_end_time,
-      sleepStartTime: session.sleep_start_time,
-      timezone: session.timezone,
-      startsAt: session.starts_at,
-      endsAt: session.ends_at,
-      status: session.status,
-      updatedAt: session.updated_at,
-      activatedAt: session.activated_at,
-    },
-  });
+  return sessionResponse(deviceAuth.device.id, session);
 }
