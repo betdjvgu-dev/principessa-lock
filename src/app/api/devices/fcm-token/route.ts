@@ -31,7 +31,10 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const deviceAuth = await requireAuthenticatedDevice(request, supabase);
+  // Must work even while a registration is pending approval -- otherwise a pending sub could
+  // never register the token needed to receive the "registration approved" push in the first
+  // place (see sendRegistrationApprovedPush in fcm.ts).
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase, { allowPendingSub: true });
 
   if (!deviceAuth.ok) {
     return deviceAuth.response;

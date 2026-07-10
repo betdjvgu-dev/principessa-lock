@@ -22,8 +22,14 @@ export type ActivateInput = {
 
 export type RegisterInput = {
   deviceName: string;
-  username: string;
+  // Optional: required only for a genuinely new registration. If hardwareIdHash matches an
+  // existing device (see /api/register), the existing username is reused and this is ignored.
+  username?: string;
   timezone?: string;
+  // Hash of Android's ANDROID_ID -- stable across app uninstall/reinstall for the same device +
+  // app signing key (only changes on factory reset), so losing the locally-stored device secret
+  // doesn't force a paid/approved sub to register a brand new account from scratch.
+  hardwareIdHash?: string;
 };
 
 export type FcmTokenInput = {
@@ -329,13 +335,17 @@ export function validateRegisterInput(input: unknown) {
 
   const payload = input as Record<string, unknown>;
   const deviceName = normalizeRequiredString(payload.deviceName);
+  const usernameProvided = payload.username !== undefined;
   const username = normalizeRequiredString(payload.username);
 
   if (!deviceName) {
     return { ok: false as const, response: jsonError(400, "deviceName is required.") };
   }
 
-  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+  // Format is still enforced whenever a username is given -- only whether it's required at all
+  // depends on hardwareIdHash resolving to an existing device, which the route decides (it needs
+  // a DB lookup this validator doesn't have access to).
+  if (usernameProvided && (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username))) {
     return {
       ok: false as const,
       response: jsonError(400, "username must be 3-20 characters using only letters, digits, and underscores."),
@@ -346,12 +356,17 @@ export function validateRegisterInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
   }
 
+  if (payload.hardwareIdHash !== undefined && normalizeRequiredString(payload.hardwareIdHash) === null) {
+    return { ok: false as const, response: jsonError(400, "hardwareIdHash must be a non-empty string when provided.") };
+  }
+
   return {
     ok: true as const,
     data: {
       deviceName,
-      username,
+      username: username ?? undefined,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
+      hardwareIdHash: normalizeRequiredString(payload.hardwareIdHash) ?? undefined,
     } satisfies RegisterInput,
   };
 }

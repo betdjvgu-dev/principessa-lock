@@ -13,6 +13,16 @@ type SubStatusRow = {
   status: string;
 };
 
+type ExistingDeviceRow = {
+  id: string;
+  sub_id: string | null;
+  subs: { username: string | null; status: string } | { username: string | null; status: string }[] | null;
+};
+
+function extractSub(value: ExistingDeviceRow["subs"]) {
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
 export async function POST(request: Request) {
   const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many registration attempts. Please wait before trying again.",
@@ -38,8 +48,67 @@ export async function POST(request: Request) {
     return validation.response;
   }
 
-  const { deviceName, username, timezone } = validation.data;
+  const { deviceName, username, timezone, hardwareIdHash } = validation.data;
   const supabase = getSupabaseAdminClient();
+
+  // Recovery path: the same physical device (same ANDROID_ID + app signing key) registering
+  // again, most likely after an uninstall/reinstall wiped its locally-stored device secret.
+  // Rotates the secret in place instead of creating a brand new account -- a paid/approved sub
+  // shouldn't lose that status (or have to pick a new username) just because they reinstalled.
+  if (hardwareIdHash) {
+    const { data: existingDevice, error: lookupError } = await supabase
+      .from("devices")
+      .select("id, sub_id, subs(username, status)")
+      .eq("hardware_id_hash", hardwareIdHash)
+      .maybeSingle<ExistingDeviceRow>();
+
+    if (lookupError) {
+      return jsonSupabaseError("Failed to check for an existing registration.", lookupError);
+    }
+
+    if (existingDevice) {
+      const existingSub = extractSub(existingDevice.subs);
+      const deviceSecret = generateDeviceSecret();
+
+      const { error: updateError } = await supabase
+        .from("devices")
+        .update({
+          device_name: deviceName,
+          device_secret_created_at: new Date().toISOString(),
+          device_secret_hash: hashDeviceSecret(deviceSecret),
+          device_secret_rotated_at: new Date().toISOString(),
+          timezone: timezone ?? null,
+        })
+        .eq("id", existingDevice.id);
+
+      if (updateError) {
+        if (updateError.code === "23505") {
+          return jsonError(409, "That device name is already taken. Choose another and try again.");
+        }
+
+        return jsonSupabaseError("Failed to recover the existing registration.", updateError);
+      }
+
+      return jsonOk(
+        {
+          device: {
+            deviceSecret,
+            id: existingDevice.id,
+          },
+          ok: true,
+          recovered: true,
+          status: existingSub?.status ?? "active",
+          subId: existingDevice.sub_id,
+          username: existingSub?.username ?? null,
+        },
+        { status: 201 },
+      );
+    }
+  }
+
+  if (!username) {
+    return jsonError(400, "username is required for a new registration.");
+  }
 
   // No admin-issued code -- the sub picks a username directly, and both the username and the
   // device name are globally unique going forward (enforced by the case-insensitive unique
@@ -67,6 +136,7 @@ export async function POST(request: Request) {
       device_name: deviceName,
       device_secret_created_at: new Date().toISOString(),
       device_secret_hash: hashDeviceSecret(deviceSecret),
+      hardware_id_hash: hardwareIdHash ?? null,
       platform: "android",
       sub_id: sub.id,
       timezone: timezone ?? null,
@@ -93,6 +163,8 @@ export async function POST(request: Request) {
         id: device.id,
       },
       ok: true,
+      recovered: false,
+      status: "invited",
       subId: sub.id,
       username,
     },

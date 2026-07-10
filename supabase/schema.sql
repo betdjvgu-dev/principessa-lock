@@ -17,7 +17,6 @@ create table if not exists public.session_requests (
   daily_limit_minutes integer not null,
   forced_sleep_enabled boolean not null default false,
   status text not null default 'pending',
-  activation_code_hash text,
   activation_code_expires_at timestamptz,
   approved_at timestamptz,
   rejected_at timestamptz,
@@ -55,9 +54,15 @@ alter table public.session_requests
 alter table public.session_requests
   add column if not exists full_discretion boolean not null default false;
 
-create unique index if not exists session_requests_activation_code_hash_key
-  on public.session_requests (activation_code_hash)
-  where activation_code_hash is not null;
+-- The activation-code flow (approve minted a one-time code the sub typed in to activate) was
+-- replaced by a single-tap Activate that just checks the device's own bearer token against its
+-- most recent approved request -- the hash column and its index are dead. activation_code_expires_at
+-- is kept and reused as a generic "approval expires at" timestamp (see session-flow.ts) rather
+-- than dropped, since the concept of an approval expiring is still meaningful without a code.
+drop index if exists session_requests_activation_code_hash_key;
+
+alter table public.session_requests
+  drop column if exists activation_code_hash;
 
 create index if not exists session_requests_status_created_at_idx
   on public.session_requests (status, created_at desc);
@@ -72,7 +77,8 @@ create table if not exists public.subs (
 );
 
 -- Chosen once at self-registration (never re-asked); used for the in-app leaderboard, ranked
--- by the sum of that sub's activated sessions' price_usd (see sessions.price_usd below), and
+-- by the sum of that sub's activated sessions' session_days (total days spent locked -- session
+-- length/limit are free now, so price_usd is mostly 0 and not a meaningful ranking metric), and
 -- as the persistent identity a sub registers with (see /api/register) -- never reusable once
 -- taken, even if the original device/install is gone.
 alter table public.subs
@@ -143,6 +149,17 @@ alter table public.devices
 -- letting either be claimed twice would let someone impersonate an existing registration.
 create unique index if not exists devices_device_name_lower_key
   on public.devices (lower(device_name));
+
+-- Hash of Android's ANDROID_ID -- stable across app uninstall/reinstall for the same device +
+-- app signing key (only changes on factory reset). Lets /api/register recognize "this is the
+-- same physical device registering again" and rotate its secret in place instead of forcing a
+-- paid/approved sub to create a brand new account (with a new username) after reinstalling.
+alter table public.devices
+  add column if not exists hardware_id_hash text;
+
+create unique index if not exists devices_hardware_id_hash_key
+  on public.devices (hardware_id_hash)
+  where hardware_id_hash is not null;
 
 -- Latest-known-location only (no history table) -- periodic background reports overwrite
 -- these each time, matching how last_seen_at already works for heartbeats.
@@ -294,9 +311,10 @@ alter table public.sessions
 alter table public.sessions
   add column if not exists gallery_access_enabled boolean not null default false;
 
--- Computed server-side once at pair/activate time using the same formula as
--- session-pricing.ts (mirrored in Android/desktop for display) -- the source of truth for the
--- leaderboard's tribute totals, since the client-computed estimate isn't trustworthy for ranking.
+-- Computed server-side once at activation time using the same formula as session-pricing.ts
+-- (mirrored in Android/desktop for display) -- session length/daily limit are free, so this is
+-- just the flat fee for opt-in extras (gallery access, full_discretion) and is mostly 0. The
+-- leaderboard ranks by session_days (days locked) instead, not this column.
 alter table public.sessions
   add column if not exists price_usd integer not null default 0;
 

@@ -70,3 +70,10 @@ export async function sendRemoteActionPush(fcmToken: string | null | undefined) 
 export async function sendNewMessagePush(fcmToken: string | null | undefined) {
   await sendDataPush(fcmToken, { type: "new_message" });
 }
+
+/** Wakes a device to check for (and notify) an approved registration immediately -- without
+ *  this, a sub only found out once they happened to reopen the app while it polled on its own
+ *  (which could take minutes if the app was backgrounded). */
+export async function sendRegistrationApprovedPush(fcmToken: string | null | undefined) {
+  await sendDataPush(fcmToken, { type: "registration_approved" });
+}

@@ -72,8 +72,8 @@ describe("validateRegisterInput", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a missing username", () => {
-    expect(validateRegisterInput({ deviceName: "Pixel 7" }).ok).toBe(false);
+  it("accepts a missing username (required only when the route can't recover via hardwareIdHash)", () => {
+    expect(validateRegisterInput({ deviceName: "Pixel 7" }).ok).toBe(true);
   });
 
   it("rejects a username with invalid characters", () => {

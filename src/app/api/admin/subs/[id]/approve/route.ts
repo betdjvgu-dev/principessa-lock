@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
+import { sendRegistrationApprovedPush } from "@/lib/server/fcm";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -13,6 +14,10 @@ type RouteContext = {
 type SubRow = {
   id: string;
   status: string;
+};
+
+type DeviceTokenRow = {
+  fcm_token: string | null;
 };
 
 // Approving a registration just flips subs.status from "invited" to "active" -- the device
@@ -53,6 +58,16 @@ export async function POST(request: Request, context: RouteContext) {
   if (!updatedSub) {
     return jsonError(409, "This registration is not pending approval.");
   }
+
+  // Best-effort -- polling remains the fallback if this device has no token yet or the push
+  // fails, so approval always still succeeds regardless.
+  const { data: device } = await supabase
+    .from("devices")
+    .select("fcm_token")
+    .eq("sub_id", id)
+    .maybeSingle<DeviceTokenRow>();
+
+  await sendRegistrationApprovedPush(device?.fcm_token);
 
   return jsonOk({
     ok: true,
