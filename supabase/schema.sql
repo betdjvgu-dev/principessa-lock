@@ -622,6 +622,19 @@ create table if not exists public.admin_push_tokens (
   updated_at timestamptz not null default now()
 );
 
+-- Tracks the current "latest" APK per platform so the app can check for updates and download
+-- from one fixed URL (/api/app-download) instead of the keyholder re-sharing a new file-sharing
+-- link on every release. Storage path is a fixed object (see fcm.ts-style comment in the route),
+-- so re-publishing a release just overwrites it in place -- the download URL never changes.
+create table if not exists public.app_releases (
+  platform text primary key,
+  version_code integer not null,
+  version_name text not null,
+  storage_path text not null,
+  release_notes text,
+  updated_at timestamptz not null default now()
+);
+
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at
 before update on public.session_requests
