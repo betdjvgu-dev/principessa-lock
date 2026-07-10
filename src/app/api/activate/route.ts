@@ -80,6 +80,44 @@ export async function POST(request: Request) {
   }
 
   if (!sessionRequest) {
+    // The most common way to land here isn't "there was never an approved request" -- it's that
+    // a previous /api/activate call already succeeded (session created, request flipped to
+    // "activated") but its response never reached the device (dropped connection, app killed
+    // mid-request, etc.), so the device retried and now finds nothing "approved" left. Rather
+    // than erroring a device that's actually already active, hand back its existing active
+    // session so a retry is self-healing instead of stranding the sub on an error screen forever.
+    const { data: existingSession } = await supabase
+      .from("sessions")
+      .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+      .eq("device_id", deviceAuth.device.id)
+      .eq("status", "active")
+      .order("activated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<SessionRow>();
+
+    if (existingSession) {
+      return jsonOk({
+        device: { id: deviceAuth.device.id },
+        ok: true,
+        session: {
+          id: existingSession.id,
+          deviceId: existingSession.device_id,
+          sessionDays: existingSession.session_days,
+          dailyLimitMinutes: existingSession.daily_limit_minutes,
+          forcedSleepEnabled: existingSession.forced_sleep_enabled,
+          configVersion: existingSession.config_version,
+          sleepEndTime: existingSession.sleep_end_time,
+          sleepStartTime: existingSession.sleep_start_time,
+          timezone: existingSession.timezone,
+          startsAt: existingSession.starts_at,
+          endsAt: existingSession.ends_at,
+          status: existingSession.status,
+          updatedAt: existingSession.updated_at,
+          activatedAt: existingSession.activated_at,
+        },
+      });
+    }
+
     return jsonError(404, "No approved session request is waiting to be activated.");
   }
 
