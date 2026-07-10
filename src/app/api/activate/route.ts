@@ -127,7 +127,11 @@ export async function POST(request: Request) {
       ends_at: endsAt.toISOString(),
       forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
       gallery_access_enabled: sessionRequest.gallery_access_enabled,
-      price_usd: calculateSessionPriceUsd(sessionRequest.full_discretion, sessionRequest.gallery_access_enabled),
+      price_usd: calculateSessionPriceUsd(
+        sessionRequest.full_discretion,
+        sessionRequest.gallery_access_enabled,
+        sessionRequest.daily_limit_minutes,
+      ),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
       sleep_end_time: "07:00",

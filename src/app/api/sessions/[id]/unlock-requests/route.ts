@@ -6,7 +6,7 @@ import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
 const MIN_SESSION_DAYS_FOR_UNLOCK = 7;
-const UNLOCK_PRICE_USD = 5;
+const UNLOCK_PRICE_USD = 3;
 
 type RouteContext = {
   params: Promise<{

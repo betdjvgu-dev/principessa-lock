@@ -369,7 +369,7 @@ create index if not exists session_messages_session_id_idx
 
 -- Paid, time-boxed exception to a session's blocked_packages list -- only offered for
 -- sessions long enough (session_days >= 7, enforced in the route, not here) for a one-off
--- app unlock to make sense. Fixed $5/app, fixed 24h from approval; the keyholder approves
+-- app unlock to make sense. Fixed $3/app, fixed 24h from approval; the keyholder approves
 -- manually after confirming payment via Throne (no in-app payment integration).
 create table if not exists public.app_unlock_requests (
   id uuid primary key default gen_random_uuid(),
@@ -378,7 +378,7 @@ create table if not exists public.app_unlock_requests (
   sub_id uuid references public.subs(id) on delete set null,
   package_name text not null,
   status text not null default 'pending',
-  price_usd integer not null default 5,
+  price_usd integer not null default 3,
   requested_at timestamptz not null default now(),
   approved_at timestamptz,
   rejected_at timestamptz,
@@ -394,6 +394,11 @@ create index if not exists app_unlock_requests_session_id_idx
 
 create index if not exists app_unlock_requests_status_idx
   on public.app_unlock_requests (status, created_at desc);
+
+-- Widened from the original $5 -- the route always passes UNLOCK_PRICE_USD explicitly on
+-- insert, so this default only matters for direct/manual inserts, kept in sync anyway.
+alter table public.app_unlock_requests
+  alter column price_usd set default 3;
 
 create table if not exists public.device_heartbeats (
   id uuid primary key default gen_random_uuid(),
@@ -514,6 +519,12 @@ alter table if exists public.device_heartbeats
 
 alter table if exists public.device_heartbeats
   add column if not exists notification_access_granted boolean;
+
+-- Reported so the keyholder can see whether the step-reward bonus can actually work on this
+-- device -- ACTIVITY_RECOGNITION (needed for TYPE_STEP_COUNTER on API 29+) is a separate runtime
+-- grant the sub might never give, in which case the toggle should be treated as inert.
+alter table if exists public.device_heartbeats
+  add column if not exists activity_recognition_granted boolean;
 
 alter table if exists public.device_heartbeats
   add column if not exists autostart_acknowledged boolean;
