@@ -31,6 +31,36 @@ function addDays(timestamp: Date, days: number) {
   return next;
 }
 
+type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
+
+// Applied unconditionally up front (before any of the several possible return paths below --
+// fresh activation, restored-after-drop, or recovered-from-a-partial-failure) so a device
+// reporting why its previous local session disappeared is captured regardless of which path
+// this particular call takes.
+async function applyDeviceUpdateFromActivateInput(
+  supabase: SupabaseAdminClient,
+  deviceId: string,
+  validationData: ActivateInput,
+) {
+  const deviceUpdate: Record<string, string> = {};
+
+  if (validationData.timezone) {
+    deviceUpdate.timezone = validationData.timezone;
+  }
+
+  // Best-effort, informational only -- surfaces why the device's previous local session
+  // disappeared (see SessionClearReasonSupport.kt) so the keyholder can see it in the admin
+  // panel instead of relying on the sub to accurately relay whatever the app showed on-screen.
+  if (validationData.lastSessionClearReason) {
+    deviceUpdate.last_session_clear_reason = validationData.lastSessionClearReason;
+    deviceUpdate.last_session_clear_at = validationData.lastSessionClearAt ?? new Date().toISOString();
+  }
+
+  if (Object.keys(deviceUpdate).length > 0) {
+    await supabase.from("devices").update(deviceUpdate).eq("id", deviceId);
+  }
+}
+
 function normalizeTimestamp(value: string) {
   const timestamp = new Date(value);
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
@@ -104,6 +134,8 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
+  await applyDeviceUpdateFromActivateInput(supabase, deviceAuth.device.id, validation.data);
+
   const { data: sessionRequest, error: loadError } = await supabase
     .from("session_requests")
     .select("*")
@@ -146,17 +178,30 @@ export async function POST(request: Request) {
 
   // A session may already exist even while its request still says "approved" if the previous
   // activation created the session but the follow-up request update or HTTP response failed.
-  // Recover that row before checking approval expiry or attempting another insert.
+  // Recover that row before checking approval expiry or attempting another insert. Deliberately
+  // not filtered to status="active" here -- an approved request whose session was already
+  // revoked/completed is a *terminal* request, not a fresh one to activate. Filtering by status
+  // up front would miss that row entirely and fall through to creating a brand new session,
+  // silently resurrecting one the keyholder had just revoked.
   const { data: sessionForRequest, error: sessionForRequestError } = await supabase
     .from("sessions")
     .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
     .eq("request_id", sessionRequest.id)
     .eq("device_id", deviceAuth.device.id)
-    .eq("status", "active")
     .maybeSingle<SessionRow>();
 
   if (sessionForRequestError) {
     return jsonSupabaseError("Failed to check the existing session.", sessionForRequestError);
+  }
+
+  if (sessionForRequest && sessionForRequest.status !== "active") {
+    await supabase
+      .from("session_requests")
+      .update({ status: "expired" })
+      .eq("id", sessionRequest.id)
+      .eq("status", "approved");
+
+    return jsonError(410, "This session has already ended. Ask your keyholder to approve a new request.");
   }
 
   if (sessionForRequest) {
@@ -198,13 +243,6 @@ export async function POST(request: Request) {
     }
 
     return jsonError(410, "Approval has expired. Ask your keyholder to approve a new request.");
-  }
-
-  if (validation.data.timezone) {
-    await supabase
-      .from("devices")
-      .update({ timezone: validation.data.timezone })
-      .eq("id", deviceAuth.device.id);
   }
 
   const startsAt = new Date();

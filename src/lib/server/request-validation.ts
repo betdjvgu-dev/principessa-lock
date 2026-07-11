@@ -18,6 +18,12 @@ export type ApproveSessionRequestInput = {
 
 export type ActivateInput = {
   timezone?: string;
+  // Best-effort, client-reported reason the device's *previous* local session disappeared (see
+  // SessionClearReasonSupport.kt) -- surfaced to the keyholder so she doesn't have to rely on the
+  // sub accurately relaying on-screen text. Purely informational, never validated against
+  // anything server-side.
+  lastSessionClearAt?: string;
+  lastSessionClearReason?: string;
 };
 
 export type RegisterInput = {
@@ -50,6 +56,15 @@ export type DnsQueryLogEntryInput = {
 
 export type DnsQueryLogInput = {
   queries: DnsQueryLogEntryInput[];
+};
+
+export type CrashReportInput = {
+  appVersionCode?: number;
+  appVersionName?: string;
+  deviceModel?: string;
+  exceptionSummary: string;
+  osVersion?: string;
+  stackTrace?: string;
 };
 
 export type SessionMessageInput = {
@@ -473,6 +488,37 @@ export function validateDnsQueryLogInput(input: unknown) {
   };
 }
 
+const MAX_STACK_TRACE_CHARS = 8000;
+
+export function validateCrashReportInput(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const exceptionSummary = normalizeRequiredString(payload.exceptionSummary);
+
+  if (!exceptionSummary) {
+    return { ok: false as const, response: jsonError(400, "exceptionSummary is required.") };
+  }
+
+  if (payload.appVersionCode !== undefined && !isFiniteNumber(payload.appVersionCode)) {
+    return { ok: false as const, response: jsonError(400, "appVersionCode must be a number when provided.") };
+  }
+
+  return {
+    ok: true as const,
+    data: {
+      appVersionCode: payload.appVersionCode as number | undefined,
+      appVersionName: typeof payload.appVersionName === "string" ? payload.appVersionName.slice(0, 100) : undefined,
+      deviceModel: typeof payload.deviceModel === "string" ? payload.deviceModel.slice(0, 200) : undefined,
+      exceptionSummary: exceptionSummary.slice(0, 1000),
+      osVersion: typeof payload.osVersion === "string" ? payload.osVersion.slice(0, 200) : undefined,
+      stackTrace: typeof payload.stackTrace === "string" ? payload.stackTrace.slice(0, MAX_STACK_TRACE_CHARS) : undefined,
+    } satisfies CrashReportInput,
+  };
+}
+
 export function validateSessionMessageInput(input: unknown) {
   if (!input || typeof input !== "object") {
     return { ok: false as const, response: jsonError(400, "Request body must be a JSON object.") };
@@ -586,6 +632,8 @@ export function validateActivateInput(input: unknown) {
   return {
     ok: true as const,
     data: {
+      lastSessionClearAt: normalizeOptionalString(payload.lastSessionClearAt) ?? undefined,
+      lastSessionClearReason: normalizeOptionalString(payload.lastSessionClearReason) ?? undefined,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
     } satisfies ActivateInput,
   };

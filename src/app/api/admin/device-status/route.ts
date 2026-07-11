@@ -68,6 +68,12 @@ function buildGroupKey(row: HeartbeatRow) {
   return row.session_id ?? row.device_id ?? row.id;
 }
 
+type DeviceClearInfoRow = {
+  id: string;
+  last_session_clear_at: string | null;
+  last_session_clear_reason: string | null;
+};
+
 export async function GET(request: Request) {
   const rateLimitError = await enforceAdminRateLimit(request, "device-status");
 
@@ -104,9 +110,34 @@ export async function GET(request: Request) {
     }
   }
 
+  const deviceIds = Array.from(latestByGroup.values())
+    .map((row) => row.device_id)
+    .filter((id): id is string => id !== null);
+
+  const clearInfoByDeviceId = new Map<string, DeviceClearInfoRow>();
+
+  if (deviceIds.length > 0) {
+    const { data: clearInfoRows, error: clearInfoError } = await supabase
+      .from("devices")
+      .select("id, last_session_clear_reason, last_session_clear_at")
+      .in("id", deviceIds)
+      .returns<DeviceClearInfoRow[]>();
+
+    if (clearInfoError) {
+      return jsonSupabaseError("Failed to load device session-clear history.", clearInfoError);
+    }
+
+    for (const row of clearInfoRows ?? []) {
+      clearInfoByDeviceId.set(row.id, row);
+    }
+  }
+
   const devices = Array.from(latestByGroup.values())
     .sort((left, right) => new Date(right.received_at).getTime() - new Date(left.received_at).getTime())
-    .map((row) => ({
+    .map((row) => {
+      const clearInfo = row.device_id ? clearInfoByDeviceId.get(row.device_id) : undefined;
+
+      return {
       activeSessionPresent: row.active_session_present,
       accessibilityGranted: row.accessibility_granted,
       accessibilityRunning: row.accessibility_running,
@@ -163,7 +194,10 @@ export async function GET(request: Request) {
       remoteActionQueueLength: row.remote_action_queue_length,
       usageAccessGranted: row.usage_access_granted,
       usedMinutes: row.used_minutes,
-    }));
+      lastSessionClearReason: clearInfo?.last_session_clear_reason ?? null,
+      lastSessionClearAt: clearInfo?.last_session_clear_at ?? null,
+      };
+    });
 
   return jsonOk({
     ok: true,

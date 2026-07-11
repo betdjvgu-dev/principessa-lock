@@ -191,6 +191,18 @@ create unique index if not exists devices_device_secret_hash_key
   on public.devices (device_secret_hash)
   where device_secret_hash is not null;
 
+-- Why this device's *previous* local session disappeared (see SessionClearReasonSupport.kt on
+-- the client) -- that reason otherwise only ever lived in the device's own SharedPreferences,
+-- unreadable by the keyholder unless the sub happened to relay the on-screen text accurately.
+-- Reported once, at the next successful /api/activate (restore or fresh), and left in place
+-- after that as a "last known" fact rather than cleared, since a rare event is more useful to
+-- still see on the next admin visit than to lose the moment a new session starts.
+alter table public.devices
+  add column if not exists last_session_clear_reason text;
+
+alter table public.devices
+  add column if not exists last_session_clear_at timestamptz;
+
 create index if not exists devices_sub_id_idx
   on public.devices (sub_id);
 
@@ -634,6 +646,29 @@ create table if not exists public.app_releases (
   release_notes text,
   updated_at timestamptz not null default now()
 );
+
+-- Best-effort client crash reports, sent by a global uncaught-exception handler right before the
+-- app actually crashes (see installCrashReporting in the Android app). Lets a device-specific
+-- crash (different Android version/OEM behaving differently than the keyholder's own test phone)
+-- show up here automatically instead of needing a screenshot of the OS crash dialog and hours of
+-- manual reproduction to diagnose.
+create table if not exists public.crash_reports (
+  id uuid primary key default gen_random_uuid(),
+  device_id uuid references public.devices(id) on delete cascade,
+  sub_id uuid references public.subs(id) on delete cascade,
+  platform text not null default 'android',
+  app_version_code integer,
+  app_version_name text,
+  device_model text,
+  os_version text,
+  exception_summary text not null,
+  stack_trace text,
+  occurred_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists crash_reports_created_at_idx
+  on public.crash_reports (created_at desc);
 
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at
