@@ -6,6 +6,13 @@ import { readJsonBody, validateRemoteActionCreateInput, type RemoteActionCreateI
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
+// Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
+// Handler caching can silently memoize even though these are always meant to be live reads
+// -- observed firsthand as an admin dashboard endpoint intermittently returning a stale/empty
+// snapshot until a later request happened to bypass the cache. force-dynamic opts every
+// request here out of that cache entirely.
+export const dynamic = "force-dynamic";
+
 type SessionLookupRow = {
   device_id: string;
   id: string;

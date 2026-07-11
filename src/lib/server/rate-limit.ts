@@ -148,11 +148,20 @@ function getUpstashLimiter(limit: number, windowMs: number): Ratelimit | null {
  * Shared, generous rate limit for authenticated admin routes. Bearer tokens here are
  * high-entropy Supabase Auth sessions (not brute-forceable), so this is defense-in-depth
  * against a leaked/compromised token being used for rapid abuse, not the primary control.
+ *
+ * 120/15min (8/min) was too tight for how the desktop admin actually behaves: its dashboard
+ * reload fires 5 parallel calls (subs, sessions, requests, device-status, unlock-requests) on
+ * every trigger, and it's retriggered by its own Supabase Realtime subscription "easily every
+ * few seconds" under real device activity (see App.tsx). That easily exceeded the old budget
+ * within 15 minutes, so whichever endpoint happened to hit the ceiling first would silently
+ * fail for that reload -- looking exactly like "subs randomly show as 0" or "an action doesn't
+ * show up until a manual reload," since the failure was per-endpoint and transient rather than
+ * a visible, persistent error.
  */
 export async function enforceAdminRateLimit(request: Request, routeKey: string) {
   return enforceRateLimit({
     errorMessage: "Too many admin requests. Please wait before trying again.",
-    limit: 120,
+    limit: 1200,
     request,
     routeKey: `admin:${routeKey}`,
     windowMs: 15 * 60 * 1000,

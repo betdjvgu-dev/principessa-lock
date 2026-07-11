@@ -7,6 +7,13 @@ import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
 
+// Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
+// Handler caching can silently memoize even though these are always meant to be live reads
+// -- observed firsthand as an admin dashboard endpoint intermittently returning a stale/empty
+// snapshot until a later request happened to bypass the cache. force-dynamic opts every
+// request here out of that cache entirely.
+export const dynamic = "force-dynamic";
+
 type SessionRow = {
   activated_at: string;
   config_version: number;
@@ -248,6 +255,21 @@ export async function POST(request: Request) {
   const startsAt = new Date();
   const endsAt = addDays(startsAt, sessionRequest.requested_days);
   const activatedAt = new Date().toISOString();
+
+  // A physical device should never be enforcing more than one session's rules at once. Without
+  // this, an approved request activating while an earlier session on the same device was still
+  // (for whatever reason) marked "active" left both rows active side by side -- the admin
+  // dashboard would show two active sessions for one device, and if the device's local app ever
+  // reverted to the older one (a stale sync, a race), the wrong daily limit/rules would enforce.
+  const { error: supersedeError } = await supabase
+    .from("sessions")
+    .update({ status: "revoked" })
+    .eq("device_id", deviceAuth.device.id)
+    .eq("status", "active");
+
+  if (supersedeError) {
+    return jsonSupabaseError("Failed to supersede the device's previous active session.", supersedeError);
+  }
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
