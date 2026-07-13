@@ -96,10 +96,36 @@ export async function POST(request: Request) {
     return validation.response;
   }
 
+  const supabase = getSupabaseAdminClient();
+
+  // Without this, a sub could submit a second request while an earlier one was still
+  // pending/approved-but-not-yet-activated -- confirmed happening during testing, and it left
+  // the keyholder looking at two simultaneous "waiting for approval" entries for the same
+  // device with no way to tell which one the sub's app actually intended to activate.
+  const { data: outstandingRequest, error: outstandingError } = await supabase
+    .from("session_requests")
+    .select("id, status")
+    .eq("device_id", deviceAuth.device.id)
+    .in("status", ["pending", "approved"])
+    .limit(1)
+    .maybeSingle<{ id: string; status: string }>();
+
+  if (outstandingError) {
+    return jsonSupabaseError("Failed to check for an outstanding session request.", outstandingError);
+  }
+
+  if (outstandingRequest) {
+    return jsonError(
+      409,
+      outstandingRequest.status === "approved"
+        ? "You already have an approved request waiting to be activated. Activate it before submitting a new one."
+        : "You already have a session request waiting for approval. Wait for a decision before submitting another.",
+    );
+  }
+
   const isFree =
     calculateSessionPriceUsd(validation.data.fullDiscretion, validation.data.galleryAccessEnabled, validation.data.dailyLimitMinutes) === 0;
 
-  const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_requests")
     .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.deviceName, deviceAuth.device.subId, isFree))

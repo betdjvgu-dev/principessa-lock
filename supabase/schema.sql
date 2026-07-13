@@ -42,6 +42,17 @@ alter table public.session_requests
   add constraint session_requests_daily_limit_minutes_check
   check (daily_limit_minutes between 5 and 1440);
 
+-- Adds 'cancelled' -- a sub can now cancel their own approved-but-not-yet-activated request (see
+-- POST /api/session-requests/cancel) instead of being stuck with no way out once a new request
+-- could no longer be submitted on top of an outstanding one. Distinct from 'rejected' (keyholder
+-- declined it) and 'expired' (approval window lapsed) so the admin dashboard can tell them apart.
+alter table public.session_requests
+  drop constraint if exists session_requests_status_check;
+
+alter table public.session_requests
+  add constraint session_requests_status_check
+  check (status in ('pending', 'approved', 'rejected', 'activated', 'expired', 'cancelled'));
+
 -- Opt-in, paid add-on chosen by the sub at request time (see pricing.ts/SessionPricing.kt
 -- for the surcharge) -- on-demand only, no automatic scanning/classification of photos.
 alter table public.session_requests
@@ -770,5 +781,16 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'device_remote_actions'
   ) then
     alter publication supabase_realtime add table public.device_remote_actions;
+  end if;
+
+  -- Without this, the desktop admin's realtime subscription (see desktop-admin/src/lib/
+  -- realtime.ts) never receives a session activating/revoking -- it only found out on the next
+  -- ~60s fallback poll, which read as the dashboard taking a while to show a session as active
+  -- even though the backend had already activated it instantly.
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'sessions'
+  ) then
+    alter publication supabase_realtime add table public.sessions;
   end if;
 end $$;
