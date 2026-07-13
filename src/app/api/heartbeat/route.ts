@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/lib/server/device-auth";
+import { sendProtectionTamperAlertPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateHeartbeatInput, type HeartbeatInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -53,6 +54,24 @@ export async function POST(request: Request) {
   if (!deviceAuth.ok) {
     return deviceAuth.response;
   }
+
+  // Snapshotted before inserting the new row below, so this reads as "what was true last time"
+  // -- used only to detect a true-to-false transition on a critical permission, not stored or
+  // compared any further.
+  const { data: previousHeartbeat } = await supabase
+    .from("device_heartbeats")
+    .select("accessibility_granted, accessibility_running, overlay_permission_granted, device_admin_granted, usage_access_granted, protection_healthy")
+    .eq("device_id", deviceAuth.device.id)
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      accessibility_granted: boolean | null;
+      accessibility_running: boolean | null;
+      overlay_permission_granted: boolean | null;
+      device_admin_granted: boolean | null;
+      usage_access_granted: boolean | null;
+      protection_healthy: boolean | null;
+    }>();
 
   const sessionOwnership = await verifySessionOwnershipForDevice({
     authenticatedDeviceId: deviceAuth.device.id,
@@ -143,6 +162,40 @@ export async function POST(request: Request) {
 
   if (updateError) {
     return jsonSupabaseError("Heartbeat was stored but device last seen update failed.", updateError);
+  }
+
+  // Only fires on a true-to-false *transition* (not "still false from before"), so a sub who's
+  // simply never granted an optional permission doesn't page the keyholder on every heartbeat --
+  // only an actual loss does. accessibility_running (the service process still being alive) is
+  // tracked separately from accessibility_granted (the permission itself) because an OEM can kill
+  // the running service via aggressive battery/background restrictions without the permission
+  // grant ever being revoked -- that's a real, silent gap otherwise.
+  const lostPermissions: string[] = [];
+  if (previousHeartbeat?.accessibility_granted === true && heartbeat.accessibilityGranted === false) {
+    lostPermissions.push("Accessibility permission revoked");
+  }
+  if (previousHeartbeat?.accessibility_running === true && heartbeat.accessibilityRunning === false) {
+    lostPermissions.push("Accessibility service stopped running");
+  }
+  if (previousHeartbeat?.overlay_permission_granted === true && heartbeat.overlayPermissionGranted === false) {
+    lostPermissions.push("Display-over-other-apps revoked");
+  }
+  if (previousHeartbeat?.device_admin_granted === true && heartbeat.deviceAdminGranted === false) {
+    lostPermissions.push("Device admin revoked");
+  }
+  if (previousHeartbeat?.usage_access_granted === true && heartbeat.usageAccessGranted === false) {
+    lostPermissions.push("Usage access revoked");
+  }
+  const protectionJustBrokeDown = previousHeartbeat?.protection_healthy === true && heartbeat.protectionHealthy === false;
+
+  if (lostPermissions.length > 0 || protectionJustBrokeDown) {
+    const reason = lostPermissions.length > 0 ? lostPermissions.join(", ") : "Protection health degraded";
+    const { data: adminToken } = await supabase
+      .from("admin_push_tokens")
+      .select("fcm_token")
+      .maybeSingle<{ fcm_token: string | null }>();
+
+    await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
   }
 
   // Best-effort: only the fields needed for the usage-history chart. Missing any of them

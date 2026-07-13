@@ -1,5 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { generateDeviceSecret, hashDeviceSecret, requireAuthenticatedDevice } from "@/lib/server/device-auth";
+import { sendNewRegistrationPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateRegisterInput, type RegisterInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
@@ -162,6 +163,17 @@ export async function POST(request: Request) {
 
     return jsonSupabaseError("Failed to register device.", deviceError);
   }
+
+  // Single-admin model -- there is at most one row in admin_push_tokens, for whichever physical
+  // device the keyholder is currently logged into the in-app admin console on. Only the fresh
+  // registration path reaches here (the hardwareIdHash recovery branch above returns earlier) --
+  // a device recovering an existing, already-approved sub isn't a new thing to review.
+  const { data: adminToken } = await supabase
+    .from("admin_push_tokens")
+    .select("fcm_token")
+    .maybeSingle<{ fcm_token: string | null }>();
+
+  await sendNewRegistrationPush(adminToken?.fcm_token, username);
 
   return jsonOk(
     {

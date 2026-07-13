@@ -91,3 +91,18 @@ export async function sendNewSessionRequestPush(fcmToken: string | null | undefi
 export async function sendSessionRequestDecisionPush(fcmToken: string | null | undefined) {
   await sendDataPush(fcmToken, { type: "session_request_decided" });
 }
+
+/** Wakes the keyholder's own device the moment a new sub self-registers and is waiting for
+ *  approval -- without this, a new registration was only visible if she happened to open the
+ *  admin console on her own. */
+export async function sendNewRegistrationPush(fcmToken: string | null | undefined, username: string) {
+  await sendDataPush(fcmToken, { type: "new_registration", username });
+}
+
+/** Wakes the keyholder's own device the moment a critical protection permission is lost (or
+ *  overall protection health degrades) on a sub's device -- without this, tamper/permission loss
+ *  was only visible if she happened to open the admin dashboard and noticed a status field
+ *  herself, potentially long after the sub used the gap to uninstall or disable protection. */
+export async function sendProtectionTamperAlertPush(fcmToken: string | null | undefined, deviceName: string, reason: string) {
+  await sendDataPush(fcmToken, { deviceName, reason, type: "protection_tamper_alert" });
+}

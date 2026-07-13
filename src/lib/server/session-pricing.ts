@@ -2,29 +2,15 @@ import "server-only";
 
 // Mirrors desktop-admin/src/lib/pricing.ts and principessa-lock/.../SessionPricing.kt exactly.
 // This is the only server-side copy -- used to stamp sessions.price_usd once at activation time
-// so the leaderboard has a trustworthy total instead of trusting a client-computed one.
-export const GALLERY_ACCESS_PRICE_USD = 5;
-export const FULL_DISCRETION_FEE_USD = 15;
+// so the leaderboard has a trustworthy total instead of trusting a client-computed one, and to
+// decide at session-requests creation time whether a request is free enough to auto-approve.
+export const GALLERY_ACCESS_PRICE_USD = 0;
+export const FULL_DISCRETION_FEE_USD = 10;
 
-// Tiered by distance from the free 30-60 min band -- a daily limit is free in that band, and
-// gets more expensive the further it goes in *either* direction (stricter below 30, more
-// lenient above 60). Default is 60 (free, top of the band).
+// The daily limit is free across its entire 5-90 minute range -- full_discretion is the only
+// paid option left. Kept as a function (rather than inlining 0) so callers don't need to know
+// that, and so a future tiered fee only has to change here.
 export function calculateDailyLimitFeeUsd(dailyLimitMinutes: number): number {
-  if (dailyLimitMinutes >= 30 && dailyLimitMinutes <= 60) {
-    return 0;
-  }
-  if (dailyLimitMinutes >= 10 && dailyLimitMinutes <= 29) {
-    return 5;
-  }
-  if (dailyLimitMinutes >= 5 && dailyLimitMinutes <= 9) {
-    return 10;
-  }
-  if (dailyLimitMinutes >= 61 && dailyLimitMinutes <= 75) {
-    return 5;
-  }
-  if (dailyLimitMinutes >= 76 && dailyLimitMinutes <= 90) {
-    return 10;
-  }
   return 0;
 }
 
