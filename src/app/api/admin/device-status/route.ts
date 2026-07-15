@@ -72,13 +72,23 @@ type HeartbeatRow = {
 };
 
 function buildGroupKey(row: HeartbeatRow) {
-  return row.session_id ?? row.device_id ?? row.id;
+  // A device can accumulate several sessions over time. Group by the stable device id first so
+  // an old session heartbeat cannot appear as a second, stale copy of the same phone.
+  return row.device_id ?? row.session_id ?? row.id;
 }
 
-type DeviceClearInfoRow = {
+type DeviceInfoRow = {
+  device_name: string;
   id: string;
   last_session_clear_at: string | null;
   last_session_clear_reason: string | null;
+  sub_id: string | null;
+};
+
+type SessionIdentityRow = {
+  device_id: string;
+  id: string;
+  sub_id: string | null;
 };
 
 export async function GET(request: Request) {
@@ -117,32 +127,62 @@ export async function GET(request: Request) {
     }
   }
 
-  const deviceIds = Array.from(latestByGroup.values())
+  const latestRows = Array.from(latestByGroup.values());
+  const deviceIds = latestRows
     .map((row) => row.device_id)
     .filter((id): id is string => id !== null);
+  const sessionIds = latestRows
+    .map((row) => row.session_id)
+    .filter((id): id is string => id !== null);
 
-  const clearInfoByDeviceId = new Map<string, DeviceClearInfoRow>();
+  const deviceInfoById = new Map<string, DeviceInfoRow>();
+  const sessionIdentityById = new Map<string, SessionIdentityRow>();
 
-  if (deviceIds.length > 0) {
-    const { data: clearInfoRows, error: clearInfoError } = await supabase
-      .from("devices")
-      .select("id, last_session_clear_reason, last_session_clear_at")
-      .in("id", deviceIds)
-      .returns<DeviceClearInfoRow[]>();
+  if (sessionIds.length > 0) {
+    const { data: sessionRows, error: sessionError } = await supabase
+      .from("sessions")
+      .select("id, device_id, sub_id")
+      .in("id", sessionIds)
+      .returns<SessionIdentityRow[]>();
 
-    if (clearInfoError) {
-      return jsonSupabaseError("Failed to load device session-clear history.", clearInfoError);
+    if (sessionError) {
+      return jsonSupabaseError("Failed to resolve heartbeat sessions.", sessionError);
     }
 
-    for (const row of clearInfoRows ?? []) {
-      clearInfoByDeviceId.set(row.id, row);
+    for (const row of sessionRows ?? []) {
+      sessionIdentityById.set(row.id, row);
     }
   }
 
-  const devices = Array.from(latestByGroup.values())
+  for (const row of latestRows) {
+    const session = row.session_id ? sessionIdentityById.get(row.session_id) : undefined;
+    if (session?.device_id && !deviceIds.includes(session.device_id)) {
+      deviceIds.push(session.device_id);
+    }
+  }
+
+  if (deviceIds.length > 0) {
+    const { data: deviceInfoRows, error: deviceInfoError } = await supabase
+      .from("devices")
+      .select("id, device_name, sub_id, last_session_clear_reason, last_session_clear_at")
+      .in("id", deviceIds)
+      .returns<DeviceInfoRow[]>();
+
+    if (deviceInfoError) {
+      return jsonSupabaseError("Failed to load device identity and session-clear history.", deviceInfoError);
+    }
+
+    for (const row of deviceInfoRows ?? []) {
+      deviceInfoById.set(row.id, row);
+    }
+  }
+
+  const devices = latestRows
     .sort((left, right) => new Date(right.received_at).getTime() - new Date(left.received_at).getTime())
     .map((row) => {
-      const clearInfo = row.device_id ? clearInfoByDeviceId.get(row.device_id) : undefined;
+      const sessionIdentity = row.session_id ? sessionIdentityById.get(row.session_id) : undefined;
+      const resolvedDeviceId = row.device_id ?? sessionIdentity?.device_id ?? null;
+      const deviceInfo = resolvedDeviceId ? deviceInfoById.get(resolvedDeviceId) : undefined;
 
       return {
       activeSessionPresent: row.active_session_present,
@@ -157,8 +197,8 @@ export async function GET(request: Request) {
       dailyLimitMinutes: row.daily_limit_minutes,
       debuggerAttached: row.debugger_attached,
       deviceAdminGranted: row.device_admin_granted,
-      deviceId: row.device_id,
-      deviceName: row.device_name,
+      deviceId: resolvedDeviceId,
+      deviceName: row.device_name ?? deviceInfo?.device_name ?? null,
       emulatorDetected: row.emulator_detected,
       foregroundServiceRunning: row.foreground_service_running,
       forcedSleepEnabled: row.forced_sleep_enabled,
@@ -196,13 +236,13 @@ export async function GET(request: Request) {
       sessionId: row.session_id,
       sessionStatus: row.session_status,
       rootDetected: row.root_detected,
-      subId: row.sub_id,
+      subId: row.sub_id ?? sessionIdentity?.sub_id ?? deviceInfo?.sub_id ?? null,
       timezone: row.timezone,
       remoteActionQueueLength: row.remote_action_queue_length,
       usageAccessGranted: row.usage_access_granted,
       usedMinutes: row.used_minutes,
-      lastSessionClearReason: clearInfo?.last_session_clear_reason ?? null,
-      lastSessionClearAt: clearInfo?.last_session_clear_at ?? null,
+      lastSessionClearReason: deviceInfo?.last_session_clear_reason ?? null,
+      lastSessionClearAt: deviceInfo?.last_session_clear_at ?? null,
       };
     });
 
