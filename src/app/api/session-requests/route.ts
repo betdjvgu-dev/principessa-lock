@@ -43,6 +43,7 @@ function buildInsertPayload(
   isFree: boolean,
 ) {
   const base = {
+    always_allowed_package: input.alwaysAllowedPackage ?? null,
     daily_limit_minutes: input.dailyLimitMinutes,
     device_id: deviceId,
     device_name: deviceName,
@@ -50,6 +51,7 @@ function buildInsertPayload(
     full_discretion: input.fullDiscretion,
     gallery_access_enabled: input.galleryAccessEnabled,
     requested_days: input.sessionDays,
+    screen_time_enabled: input.screenTimeEnabled,
     sub_id: subId,
   };
 

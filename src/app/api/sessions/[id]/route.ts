@@ -18,6 +18,7 @@ type RouteContext = {
 
 type SessionRow = {
   activated_at: string;
+  always_allowed_package: string | null;
   blocked_packages: string[];
   blocked_domains: string[];
   content_filter_enabled: boolean;
@@ -29,6 +30,7 @@ type SessionRow = {
   forced_sleep_enabled: boolean;
   gallery_access_enabled: boolean;
   id: string;
+  screen_time_enabled: boolean;
   session_days: number;
   sleep_end_time: string;
   sleep_start_time: string;
@@ -67,7 +69,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: session, error } = await supabase
     .from("sessions")
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled")
+    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled")
     .eq("id", id)
     .maybeSingle<SessionRow>();
 
@@ -91,6 +93,7 @@ export async function GET(request: Request, context: RouteContext) {
   return jsonOk({
     ok: true,
     activatedAt: session.activated_at,
+    alwaysAllowedPackage: session.always_allowed_package,
     blockedPackages: session.blocked_packages,
     unlockedPackages: (unlocks ?? []).map((row) => row.package_name),
     blockedDomains: session.blocked_domains,
@@ -101,6 +104,7 @@ export async function GET(request: Request, context: RouteContext) {
     endsAt: session.ends_at,
     forcedSleepEnabled: session.forced_sleep_enabled,
     galleryAccessEnabled: session.gallery_access_enabled,
+    screenTimeEnabled: session.screen_time_enabled,
     configVersion: session.config_version,
     sessionDays: session.session_days,
     sessionId: session.id,

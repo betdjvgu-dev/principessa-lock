@@ -25,6 +25,7 @@ type RouteContext = {
 
 type SessionRow = {
   activated_at: string;
+  always_allowed_package: string | null;
   blocked_domains: string[];
   blocked_packages: string[];
   content_filter_enabled: boolean;
@@ -37,6 +38,7 @@ type SessionRow = {
   id: string;
   request_id: string;
   session_days: number;
+  screen_time_enabled: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -58,6 +60,7 @@ function addDays(timestamp: string, days: number) {
 function formatSessionResponse(session: SessionRow) {
   return {
     activated_at: session.activated_at,
+    always_allowed_package: session.always_allowed_package,
     blocked_domains: session.blocked_domains,
     blocked_packages: session.blocked_packages,
     content_filter_enabled: session.content_filter_enabled,
@@ -71,6 +74,7 @@ function formatSessionResponse(session: SessionRow) {
     id: session.id,
     request_id: session.request_id,
     session_days: session.session_days,
+    screen_time_enabled: session.screen_time_enabled,
     sleep_end_time: session.sleep_end_time,
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,
@@ -88,6 +92,14 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
 
   if (input.dailyLimitMinutes !== undefined && input.dailyLimitMinutes !== session.daily_limit_minutes) {
     updatePayload.daily_limit_minutes = input.dailyLimitMinutes;
+  }
+
+  if (input.screenTimeEnabled !== undefined && input.screenTimeEnabled !== session.screen_time_enabled) {
+    updatePayload.screen_time_enabled = input.screenTimeEnabled;
+  }
+
+  if (input.alwaysAllowedPackage !== undefined && input.alwaysAllowedPackage !== session.always_allowed_package) {
+    updatePayload.always_allowed_package = input.alwaysAllowedPackage;
   }
 
   if (input.forcedSleepEnabled !== undefined && input.forcedSleepEnabled !== session.forced_sleep_enabled) {
@@ -184,7 +196,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { data: session, error: loadError } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
     )
     .eq("id", id)
     .maybeSingle<SessionRow>();
@@ -217,7 +229,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .update(updatePayload)
     .eq("id", id)
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
     )
     .maybeSingle<SessionRow>();
 

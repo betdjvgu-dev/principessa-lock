@@ -65,6 +65,15 @@ alter table public.session_requests
 alter table public.session_requests
   add column if not exists full_discretion boolean not null default false;
 
+-- Screen-time enforcement is optional per session request and remains enabled for existing
+-- clients/rows. The sub may also protect one ordinary launcher app from the admin's per-app
+-- block list; critical system/settings packages are rejected by the API.
+alter table public.session_requests
+  add column if not exists screen_time_enabled boolean not null default true;
+
+alter table public.session_requests
+  add column if not exists always_allowed_package text;
+
 -- The activation-code flow (approve minted a one-time code the sub typed in to activate) was
 -- replaced by a single-tap Activate that just checks the device's own bearer token against its
 -- most recent approved request -- the hash column and its index are dead. activation_code_expires_at
@@ -300,6 +309,12 @@ create index if not exists sessions_sub_id_idx
 -- independent of (and in addition to) the whole-device lock.
 alter table public.sessions
   add column if not exists blocked_packages jsonb not null default '[]'::jsonb;
+
+alter table public.sessions
+  add column if not exists screen_time_enabled boolean not null default true;
+
+alter table public.sessions
+  add column if not exists always_allowed_package text;
 
 -- Sparse per-weekday overrides for daily_limit_minutes/sleep_start_time/sleep_end_time, e.g.
 -- {"sat": {"dailyLimitMinutes": 60}, "sun": {"dailyLimitMinutes": 60, "sleepStartTime": "23:30"}}.

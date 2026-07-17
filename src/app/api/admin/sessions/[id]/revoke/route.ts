@@ -1,6 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
+import { queueSyncConfigPush } from "@/lib/server/remote-action-dispatch";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -115,6 +116,12 @@ export async function POST(request: Request, context: RouteContext) {
   if (!updatedSession) {
     return jsonError(409, "Session is no longer active.");
   }
+
+  await queueSyncConfigPush(supabase, {
+    deviceId: updatedSession.device_id,
+    sessionId: updatedSession.id,
+    subId: null,
+  });
 
   return jsonOk({
     ok: true,

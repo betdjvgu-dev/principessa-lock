@@ -56,7 +56,7 @@ export async function POST(request: Request) {
     return validation.response;
   }
 
-  const { deviceName, username, timezone, hardwareIdHash } = validation.data;
+  const { deviceName, username, timezone, hardwareIdHash, deviceSecret: suppliedDeviceSecret } = validation.data;
   const supabase = getSupabaseAdminClient();
 
   // Recovery path: the same physical device (same ANDROID_ID + app signing key) registering
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
     if (existingDevice) {
       const existingSub = extractSub(existingDevice.subs);
-      const deviceSecret = generateDeviceSecret();
+      const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
 
       const { error: updateError } = await supabase
         .from("devices")
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Failed to register.", subError);
   }
 
-  const deviceSecret = generateDeviceSecret();
+  const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
   const { data: device, error: deviceError } = await supabase
     .from("devices")
     .insert({

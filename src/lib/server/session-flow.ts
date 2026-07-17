@@ -1,6 +1,7 @@
 import "server-only";
 
 export type SessionRequestRow = {
+  always_allowed_package: string | null;
   // Column name is a holdover from the old activation-code system (there's no code anymore --
   // approval just moves status to "approved" and the sub activates with a single tap), but it's
   // reused as-is to avoid a schema migration. It still means the same thing: how long an
@@ -18,6 +19,7 @@ export type SessionRequestRow = {
   id: string;
   rejected_at: string | null;
   requested_days: number;
+  screen_time_enabled: boolean;
   status: "pending" | "approved" | "rejected" | "activated" | "expired";
   sub_id: string | null;
   updated_at: string;

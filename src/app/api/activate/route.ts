@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 type SessionRow = {
   activated_at: string;
+  always_allowed_package: string | null;
   config_version: number;
   daily_limit_minutes: number;
   device_id: string;
@@ -23,6 +24,7 @@ type SessionRow = {
   forced_sleep_enabled: boolean;
   gallery_access_enabled: boolean;
   id: string;
+  screen_time_enabled: boolean;
   session_days: number;
   sleep_end_time: string;
   sleep_start_time: string;
@@ -88,11 +90,13 @@ function sessionResponse(deviceId: string, session: SessionRow) {
     ok: true,
     session: {
       id: session.id,
+      alwaysAllowedPackage: session.always_allowed_package,
       deviceId: session.device_id,
       sessionDays: session.session_days,
       dailyLimitMinutes: session.daily_limit_minutes,
       forcedSleepEnabled: session.forced_sleep_enabled,
       galleryAccessEnabled: session.gallery_access_enabled,
+      screenTimeEnabled: session.screen_time_enabled,
       configVersion: session.config_version,
       sleepEndTime: session.sleep_end_time,
       sleepStartTime: session.sleep_start_time,
@@ -165,7 +169,7 @@ export async function POST(request: Request) {
     // session so a retry is self-healing instead of stranding the sub on an error screen forever.
     const { data: existingSession, error: existingSessionError } = await supabase
       .from("sessions")
-      .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+      .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
       .eq("device_id", deviceAuth.device.id)
       .eq("status", "active")
       .order("activated_at", { ascending: false })
@@ -192,7 +196,7 @@ export async function POST(request: Request) {
   // silently resurrecting one the keyholder had just revoked.
   const { data: sessionForRequest, error: sessionForRequestError } = await supabase
     .from("sessions")
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
     .eq("request_id", sessionRequest.id)
     .eq("device_id", deviceAuth.device.id)
     .maybeSingle<SessionRow>();
@@ -275,6 +279,7 @@ export async function POST(request: Request) {
     .from("sessions")
     .insert({
       activated_at: activatedAt,
+      always_allowed_package: sessionRequest.always_allowed_package,
       daily_limit_minutes: sessionRequest.daily_limit_minutes,
       device_id: deviceAuth.device.id,
       ends_at: endsAt.toISOString(),
@@ -287,6 +292,7 @@ export async function POST(request: Request) {
       ),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,
+      screen_time_enabled: sessionRequest.screen_time_enabled,
       sleep_end_time: "07:00",
       sleep_start_time: "23:00",
       starts_at: startsAt.toISOString(),
@@ -294,14 +300,14 @@ export async function POST(request: Request) {
       sub_id: sessionRequest.sub_id,
       timezone: validation.data.timezone ?? null,
     })
-    .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
     .maybeSingle<SessionRow>();
 
   if (sessionError) {
     if (sessionError.code === "23505") {
       const { data: concurrentSession, error: concurrentSessionError } = await supabase
         .from("sessions")
-        .select("id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
+        .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at")
         .eq("request_id", sessionRequest.id)
         .eq("device_id", deviceAuth.device.id)
         .eq("status", "active")

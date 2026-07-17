@@ -25,6 +25,34 @@ describe("validateSessionRequestInput", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("accepts disabled screen time and one ordinary always-allowed app", () => {
+    const result = validateSessionRequestInput({
+      ...valid,
+      alwaysAllowedPackage: "com.spotify.music",
+      screenTimeEnabled: false,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.screenTimeEnabled).toBe(false);
+      expect(result.data.alwaysAllowedPackage).toBe("com.spotify.music");
+    }
+  });
+
+  it("rejects critical system packages as always allowed", () => {
+    expect(
+      validateSessionRequestInput({
+        ...valid,
+        alwaysAllowedPackage: "com.android.settings",
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateSessionRequestInput({
+        ...valid,
+        alwaysAllowedPackage: "com.google.android.permissioncontroller",
+      }).ok,
+    ).toBe(false);
+  });
+
   it("rejects a missing deviceName", () => {
     const result = validateSessionRequestInput({ ...valid, deviceName: "  " });
     expect(result.ok).toBe(false);
@@ -74,6 +102,27 @@ describe("validateRegisterInput", () => {
 
   it("accepts a missing username (required only when the route can't recover via hardwareIdHash)", () => {
     expect(validateRegisterInput({ deviceName: "Pixel 7" }).ok).toBe(true);
+  });
+
+  it("accepts a valid client-generated device secret for idempotent retries", () => {
+    expect(
+      validateRegisterInput({
+        deviceName: "Pixel 7",
+        deviceSecret: `plock_${"a".repeat(43)}`,
+        hardwareIdHash: "hardware-hash",
+        username: "alex_92",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects a weak client-generated device secret", () => {
+    expect(
+      validateRegisterInput({
+        deviceName: "Pixel 7",
+        deviceSecret: "plock_weak",
+        username: "alex_92",
+      }).ok,
+    ).toBe(false);
   });
 
   it("rejects a username with invalid characters", () => {

@@ -32,6 +32,7 @@ type DeviceLocation = {
 
 type SessionRow = {
   activated_at: string;
+  always_allowed_package: string | null;
   blocked_packages: string[];
   blocked_domains: string[];
   content_filter_enabled: boolean;
@@ -49,6 +50,7 @@ type SessionRow = {
   id: string;
   request_id: string;
   session_days: number;
+  screen_time_enabled: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -85,6 +87,7 @@ type RawDevice = {
 
 type RawSessionRow = {
   activated_at: string;
+  always_allowed_package: string | null;
   blocked_packages: string[];
   blocked_domains: string[];
   content_filter_enabled: boolean;
@@ -99,6 +102,7 @@ type RawSessionRow = {
   id: string;
   request_id: string;
   session_days: number;
+  screen_time_enabled: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -172,7 +176,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -184,6 +188,7 @@ export async function GET(request: Request) {
 
   const sessions: SessionRow[] = (data ?? []).map((session) => ({
     activated_at: session.activated_at,
+    always_allowed_package: session.always_allowed_package,
     blocked_packages: session.blocked_packages,
     blocked_domains: session.blocked_domains,
     content_filter_enabled: session.content_filter_enabled,
@@ -201,6 +206,7 @@ export async function GET(request: Request) {
     id: session.id,
     request_id: session.request_id,
     session_days: session.session_days,
+    screen_time_enabled: session.screen_time_enabled,
     sleep_end_time: session.sleep_end_time,
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,
