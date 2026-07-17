@@ -405,10 +405,12 @@ create table if not exists public.session_messages (
 create index if not exists session_messages_session_id_idx
   on public.session_messages (session_id, created_at desc);
 
--- Paid, time-boxed exception to a session's blocked_packages list -- only offered for
--- sessions long enough (session_days >= 7, enforced in the route, not here) for a one-off
--- app unlock to make sense. Fixed $3/app, fixed 24h from approval; the keyholder approves
--- manually after confirming payment via Throne (no in-app payment integration).
+-- Paid, time-boxed exception to a session's blocked_packages list -- available on any active
+-- session. price_usd scales with how much session time is left at request time (see
+-- calculateAppUnlockPriceUsd in session-pricing.ts); expires_at is set to the session's own
+-- ends_at at approval time, not a fixed duration, so the unlock covers the rest of the session
+-- rather than a flat window. The keyholder approves manually after confirming payment via
+-- Throne (no in-app payment integration).
 create table if not exists public.app_unlock_requests (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
@@ -433,10 +435,11 @@ create index if not exists app_unlock_requests_session_id_idx
 create index if not exists app_unlock_requests_status_idx
   on public.app_unlock_requests (status, created_at desc);
 
--- Widened from the original $5 -- the route always passes UNLOCK_PRICE_USD explicitly on
--- insert, so this default only matters for direct/manual inserts, kept in sync anyway.
+-- The route always computes and passes price_usd explicitly on insert (see
+-- calculateAppUnlockPriceUsd) -- this default only matters for direct/manual inserts, kept as
+-- the $1 floor price for consistency.
 alter table public.app_unlock_requests
-  alter column price_usd set default 3;
+  alter column price_usd set default 1;
 
 create table if not exists public.device_heartbeats (
   id uuid primary key default gen_random_uuid(),

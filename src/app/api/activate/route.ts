@@ -289,6 +289,8 @@ export async function POST(request: Request) {
         sessionRequest.full_discretion,
         sessionRequest.gallery_access_enabled,
         sessionRequest.daily_limit_minutes,
+        sessionRequest.requested_days,
+        sessionRequest.screen_time_enabled,
       ),
       request_id: sessionRequest.id,
       session_days: sessionRequest.requested_days,

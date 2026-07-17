@@ -126,7 +126,13 @@ export async function POST(request: Request) {
   }
 
   const isFree =
-    calculateSessionPriceUsd(validation.data.fullDiscretion, validation.data.galleryAccessEnabled, validation.data.dailyLimitMinutes) === 0;
+    calculateSessionPriceUsd(
+      validation.data.fullDiscretion,
+      validation.data.galleryAccessEnabled,
+      validation.data.dailyLimitMinutes,
+      validation.data.sessionDays,
+      validation.data.screenTimeEnabled,
+    ) === 0;
 
   const { data, error } = await supabase
     .from("session_requests")

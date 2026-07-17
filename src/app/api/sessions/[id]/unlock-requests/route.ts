@@ -2,6 +2,7 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateAppUnlockRequestInput, type AppUnlockRequestInput } from "@/lib/server/request-validation";
+import { calculateAppUnlockPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -12,9 +13,6 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 // request here out of that cache entirely.
 export const dynamic = "force-dynamic";
 
-const MIN_SESSION_DAYS_FOR_UNLOCK = 7;
-const UNLOCK_PRICE_USD = 3;
-
 type RouteContext = {
   params: Promise<{
     id: string;
@@ -23,6 +21,7 @@ type RouteContext = {
 
 type SessionRow = {
   blocked_packages: string[];
+  ends_at: string;
   session_days: number;
   status: string;
 };
@@ -88,7 +87,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("session_days, blocked_packages, status")
+    .select("session_days, blocked_packages, ends_at, status")
     .eq("id", id)
     .maybeSingle<SessionRow>();
 
@@ -102,10 +101,6 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (session.status !== "active") {
     return jsonError(409, "Session is not active.");
-  }
-
-  if (session.session_days < MIN_SESSION_DAYS_FOR_UNLOCK) {
-    return jsonError(403, `Only sessions of ${MIN_SESSION_DAYS_FOR_UNLOCK}+ days can request an app unlock.`);
   }
 
   if (!session.blocked_packages.includes(validation.data.packageName)) {
@@ -133,12 +128,17 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonError(409, "An unlock request for this app is already pending or active.");
   }
 
+  // Priced (and charged) at the moment the sub requests it, not at approval time -- the sub needs
+  // to know the real price before deciding whether it's worth asking for, and shouldn't end up
+  // owing more or less than what they saw just because the keyholder took a while to approve it.
+  const priceUsd = calculateAppUnlockPriceUsd(new Date(session.ends_at).getTime() - Date.now());
+
   const { data: created, error: insertError } = await supabase
     .from("app_unlock_requests")
     .insert({
       device_id: deviceAuth.device.id,
       package_name: validation.data.packageName,
-      price_usd: UNLOCK_PRICE_USD,
+      price_usd: priceUsd,
       session_id: id,
       sub_id: deviceAuth.device.subId,
     })

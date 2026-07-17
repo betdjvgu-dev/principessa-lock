@@ -12,8 +12,6 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 // request here out of that cache entirely.
 export const dynamic = "force-dynamic";
 
-const UNLOCK_DURATION_MS = 24 * 60 * 60 * 1000;
-
 type RouteContext = {
   params: Promise<{
     id: string;
@@ -40,14 +38,44 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const supabase = getSupabaseAdminClient();
+
+  const { data: pendingRequest, error: pendingError } = await supabase
+    .from("app_unlock_requests")
+    .select("id, session_id, status")
+    .eq("id", id)
+    .maybeSingle<{ id: string; session_id: string; status: string }>();
+
+  if (pendingError) {
+    return jsonSupabaseError("Failed to load unlock request.", pendingError);
+  }
+
+  if (!pendingRequest || pendingRequest.status !== "pending") {
+    return jsonError(409, "Unlock request is no longer pending.");
+  }
+
+  // The unlock lasts until the session itself ends, not a fixed window from approval -- so it
+  // needs the session's actual end time here rather than a duration constant.
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("ends_at, status")
+    .eq("id", pendingRequest.session_id)
+    .maybeSingle<{ ends_at: string; status: string }>();
+
+  if (sessionError) {
+    return jsonSupabaseError("Failed to load the session for this unlock request.", sessionError);
+  }
+
+  if (!session || session.status !== "active" || new Date(session.ends_at).getTime() <= Date.now()) {
+    return jsonError(409, "That session has already ended -- nothing left to unlock.");
+  }
+
   const approvedAt = new Date();
-  const expiresAt = new Date(approvedAt.getTime() + UNLOCK_DURATION_MS);
 
   const { data: updated, error: updateError } = await supabase
     .from("app_unlock_requests")
     .update({
       approved_at: approvedAt.toISOString(),
-      expires_at: expiresAt.toISOString(),
+      expires_at: session.ends_at,
       rejected_at: null,
       status: "approved",
     })
