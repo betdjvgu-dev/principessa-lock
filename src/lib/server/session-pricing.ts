@@ -17,12 +17,12 @@ export function calculateDailyLimitFeeUsd(dailyLimitMinutes: number): number {
 export const SCREEN_TIME_FEE_PER_DAY_USD = 1;
 export const SCREEN_TIME_MIN_FEE_USD = 5;
 
-// Paying for Principessa to actually enforce a daily screen-time limit -- more days under the
-// limit is more control exerted for longer, so the fee scales with session length ($1/day) with a
-// $5 floor so a short session doesn't trivially undercut it. Free when screenTimeEnabled is off,
-// since there's nothing being enforced to charge for.
+// Paying to go *without* a daily screen-time limit -- the limit itself stays free (it always has
+// been, across its whole 5-90 minute range), but choosing unrestricted screen time for the session
+// costs money, scaling with session length ($1/day) with a $5 floor so a short session doesn't
+// trivially undercut it. Free when screenTimeEnabled is on, since the limit is still doing its job.
 export function calculateScreenTimeFeeUsd(sessionDays: number, screenTimeEnabled: boolean): number {
-  if (!screenTimeEnabled) {
+  if (screenTimeEnabled) {
     return 0;
   }
   return Math.max(SCREEN_TIME_MIN_FEE_USD, sessionDays * SCREEN_TIME_FEE_PER_DAY_USD);

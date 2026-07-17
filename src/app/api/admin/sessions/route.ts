@@ -48,6 +48,7 @@ type SessionRow = {
   forced_sleep_enabled: boolean;
   gallery_access_enabled: boolean;
   id: string;
+  paused_at: string | null;
   request_id: string;
   session_days: number;
   screen_time_enabled: boolean;
@@ -100,6 +101,7 @@ type RawSessionRow = {
   forced_sleep_enabled: boolean;
   gallery_access_enabled: boolean;
   id: string;
+  paused_at: string | null;
   request_id: string;
   session_days: number;
   screen_time_enabled: boolean;
@@ -176,7 +178,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -204,6 +206,7 @@ export async function GET(request: Request) {
     forced_sleep_enabled: session.forced_sleep_enabled,
     gallery_access_enabled: session.gallery_access_enabled,
     id: session.id,
+    paused_at: session.paused_at,
     request_id: session.request_id,
     session_days: session.session_days,
     screen_time_enabled: session.screen_time_enabled,

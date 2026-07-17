@@ -356,6 +356,16 @@ alter table public.sessions
 alter table public.sessions
   add column if not exists price_usd integer not null default 0;
 
+-- Set the moment the device detects the Accessibility permission is gone (see /api/sessions/[id]/
+-- pause) -- null means not paused. Kept as a separate marker rather than a new `status` value so
+-- every existing status=='active' check (leaderboard, unlock pricing, activation, etc.) keeps
+-- working unchanged; paused is a sub-state of active, not a different lifecycle stage. On resume
+-- (/api/sessions/[id]/resume), the elapsed paused duration is added to ends_at so the sub doesn't
+-- lose session time to a permission an OEM silently revoked out from under them, then this is
+-- cleared back to null.
+alter table public.sessions
+  add column if not exists paused_at timestamptz;
+
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
