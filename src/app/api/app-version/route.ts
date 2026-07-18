@@ -13,7 +13,6 @@ export const dynamic = "force-dynamic";
 type AppReleaseRow = {
   platform: string;
   release_notes: string | null;
-  storage_path: string;
   updated_at: string;
   version_code: number;
   version_name: string;
@@ -41,7 +40,7 @@ export async function GET(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("app_releases")
-    .select("platform, version_code, version_name, release_notes, storage_path, updated_at")
+    .select("platform, version_code, version_name, release_notes, updated_at")
     .eq("platform", platform)
     .maybeSingle<AppReleaseRow>();
 

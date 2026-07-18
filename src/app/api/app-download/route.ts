@@ -1,5 +1,6 @@
 import { jsonError } from "@/lib/server/api-response";
 import { getServerEnv } from "@/lib/env";
+import { resolveAppReleaseDownloadUrl } from "@/lib/server/app-release";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
@@ -12,13 +13,13 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 export const dynamic = "force-dynamic";
 
 type AppReleaseRow = {
-  storage_path: string;
+  download_url: string | null;
+  storage_path: string | null;
 };
 
 // Public and unauthenticated, same reasoning as /api/app-version -- this is the one fixed URL
-// the keyholder shares once. Publishing a new release overwrites the same storage object (see
-// scripts/publish-android-release.js), so this always redirects to whatever's current without
-// the app or the keyholder ever needing to know the underlying storage path changed.
+// the keyholder shares once. New releases redirect to a public GitHub Release asset. The legacy
+// Supabase Storage path remains a fallback while existing release metadata is migrated.
 export async function GET(request: Request) {
   const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many download requests. Please wait before trying again.",
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("app_releases")
-    .select("storage_path")
+    .select("download_url, storage_path")
     .eq("platform", platform)
     .maybeSingle<AppReleaseRow>();
 
@@ -51,7 +52,10 @@ export async function GET(request: Request) {
   }
 
   const { SUPABASE_URL } = getServerEnv();
-  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/app-releases/${data.storage_path}`;
+  const publicUrl = resolveAppReleaseDownloadUrl(data, SUPABASE_URL);
+  if (!publicUrl) {
+    return jsonError(503, "The latest release does not have a valid download URL.");
+  }
 
   return Response.redirect(publicUrl, 302);
 }

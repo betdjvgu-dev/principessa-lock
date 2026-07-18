@@ -673,15 +673,14 @@ create table if not exists public.admin_push_tokens (
   updated_at timestamptz not null default now()
 );
 
--- Tracks the current "latest" APK per platform so the app can check for updates and download
--- from one fixed URL (/api/app-download) instead of the keyholder re-sharing a new file-sharing
--- link on every release. Storage path is a fixed object (see fcm.ts-style comment in the route),
--- so re-publishing a release just overwrites it in place -- the download URL never changes.
+-- Tracks the current release per platform. APK files are hosted as public GitHub Release assets;
+-- storage_path remains nullable only as a migration fallback for older Supabase-hosted releases.
 create table if not exists public.app_releases (
   platform text primary key,
   version_code integer not null,
   version_name text not null,
-  storage_path text not null,
+  download_url text,
+  storage_path text,
   release_notes text,
   updated_at timestamptz not null default now()
 );
