@@ -57,6 +57,8 @@ export async function POST(request: Request) {
     platform: "android",
     stack_trace: validation.data.stackTrace ?? null,
     sub_id: deviceAuth.device.subId,
+    crashed_during_feature: validation.data.crashedDuringFeature ?? null,
+    crashed_during_stage: validation.data.crashedDuringStage ?? null,
   });
 
   if (error) {

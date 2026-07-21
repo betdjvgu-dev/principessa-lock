@@ -56,7 +56,17 @@ export async function POST(request: Request) {
     return validation.response;
   }
 
-  const { deviceName, username, timezone, hardwareIdHash, deviceSecret: suppliedDeviceSecret } = validation.data;
+  const {
+    deviceName,
+    username,
+    timezone,
+    hardwareIdHash,
+    deviceSecret: suppliedDeviceSecret,
+    deviceManufacturer,
+    deviceModel,
+    androidRelease,
+    androidSdkInt,
+  } = validation.data;
   const supabase = getSupabaseAdminClient();
 
   // Recovery path: the same physical device (same ANDROID_ID + app signing key) registering
@@ -86,6 +96,10 @@ export async function POST(request: Request) {
           device_secret_hash: hashDeviceSecret(deviceSecret),
           device_secret_rotated_at: new Date().toISOString(),
           timezone: timezone ?? null,
+          device_manufacturer: deviceManufacturer ?? null,
+          device_model: deviceModel ?? null,
+          android_release: androidRelease ?? null,
+          android_sdk_int: androidSdkInt ?? null,
         })
         .eq("id", existingDevice.id);
 
@@ -148,6 +162,10 @@ export async function POST(request: Request) {
       platform: "android",
       sub_id: sub.id,
       timezone: timezone ?? null,
+      device_manufacturer: deviceManufacturer ?? null,
+      device_model: deviceModel ?? null,
+      android_release: androidRelease ?? null,
+      android_sdk_int: androidSdkInt ?? null,
     })
     .select("id")
     .single<{ id: string }>();

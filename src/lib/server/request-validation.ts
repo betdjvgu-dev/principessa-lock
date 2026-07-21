@@ -42,6 +42,13 @@ export type RegisterInput = {
   // idempotent if the backend committed an earlier request but its response never reached the
   // device. The backend stores only its hash.
   deviceSecret?: string;
+  // Self-reported Build.* values, purely informational (never validated against anything, no
+  // access control depends on them) -- lets the keyholder see what device/OS a sub is on without
+  // asking. Any of these being missing/malformed just means the dashboard shows less, not an error.
+  deviceManufacturer?: string;
+  deviceModel?: string;
+  androidRelease?: string;
+  androidSdkInt?: number;
 };
 
 export type FcmTokenInput = {
@@ -71,6 +78,10 @@ export type CrashReportInput = {
   exceptionSummary: string;
   osVersion?: string;
   stackTrace?: string;
+  // Which bracketed operation (see OperationStageTracking.kt) hadn't finished yet at the moment
+  // of the crash, if any -- e.g. "forced_sleep"/"lock_now". Purely informational.
+  crashedDuringFeature?: string;
+  crashedDuringStage?: string;
 };
 
 export type SessionMessageInput = {
@@ -151,6 +162,20 @@ export type HeartbeatInput = {
   usageAccessGranted?: boolean;
   usedMinutes?: number;
   appVersion?: string;
+  // Self-reported Build.* values, same as RegisterInput -- sent on every heartbeat (not just
+  // registration) so an OS update or a device that registered before this existed both get
+  // picked up here instead of being stuck with a stale/missing value forever.
+  deviceManufacturer?: string;
+  deviceModel?: string;
+  androidRelease?: string;
+  androidSdkInt?: number;
+  // Set only if the previous app process began a bracketed operation (see
+  // OperationStageTracking.kt) and never finished it -- i.e. the process died mid-operation.
+  // Cleared client-side once a heartbeat carrying it is confirmed sent, so this only shows up
+  // once per actual failure, not on every heartbeat forever.
+  lastFailedFeature?: string;
+  lastFailedStage?: string;
+  lastFailedDetectedAt?: string;
 };
 
 export type RemoteActionCreateInput = {
@@ -425,6 +450,16 @@ export function validateRegisterInput(input: unknown) {
     };
   }
 
+  // Purely informational (see RegisterInput comment) -- clamp length instead of rejecting, since
+  // there's nothing to actually validate a Build.* string against and a malformed value shouldn't
+  // fail the whole registration.
+  const clampDeviceInfoString = (value: unknown) => normalizeRequiredString(value)?.slice(0, 100) ?? undefined;
+  const androidSdkInt =
+    typeof payload.androidSdkInt === "number" && Number.isInteger(payload.androidSdkInt) &&
+    payload.androidSdkInt > 0 && payload.androidSdkInt < 1000
+      ? payload.androidSdkInt
+      : undefined;
+
   return {
     ok: true as const,
     data: {
@@ -433,6 +468,10 @@ export function validateRegisterInput(input: unknown) {
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
       hardwareIdHash: normalizeRequiredString(payload.hardwareIdHash) ?? undefined,
       deviceSecret: deviceSecret ?? undefined,
+      deviceManufacturer: clampDeviceInfoString(payload.deviceManufacturer),
+      deviceModel: clampDeviceInfoString(payload.deviceModel),
+      androidRelease: clampDeviceInfoString(payload.androidRelease),
+      androidSdkInt,
     } satisfies RegisterInput,
   };
 }
@@ -565,6 +604,8 @@ export function validateCrashReportInput(input: unknown) {
       exceptionSummary: exceptionSummary.slice(0, 1000),
       osVersion: typeof payload.osVersion === "string" ? payload.osVersion.slice(0, 200) : undefined,
       stackTrace: typeof payload.stackTrace === "string" ? payload.stackTrace.slice(0, MAX_STACK_TRACE_CHARS) : undefined,
+      crashedDuringFeature: typeof payload.crashedDuringFeature === "string" ? payload.crashedDuringFeature.slice(0, 100) : undefined,
+      crashedDuringStage: typeof payload.crashedDuringStage === "string" ? payload.crashedDuringStage.slice(0, 100) : undefined,
     } satisfies CrashReportInput,
   };
 }
@@ -940,6 +981,17 @@ export function validateHeartbeatInput(input: unknown) {
       stepsToday: payload.stepsToday as number | undefined,
       usageAccessGranted: payload.usageAccessGranted as boolean | undefined,
       usedMinutes: payload.usedMinutes as number | undefined,
+      deviceManufacturer: normalizeOptionalString(payload.deviceManufacturer)?.slice(0, 100) ?? undefined,
+      deviceModel: normalizeOptionalString(payload.deviceModel)?.slice(0, 100) ?? undefined,
+      androidRelease: normalizeOptionalString(payload.androidRelease)?.slice(0, 100) ?? undefined,
+      androidSdkInt:
+        typeof payload.androidSdkInt === "number" && Number.isInteger(payload.androidSdkInt) &&
+        payload.androidSdkInt > 0 && payload.androidSdkInt < 1000
+          ? payload.androidSdkInt
+          : undefined,
+      lastFailedFeature: normalizeOptionalString(payload.lastFailedFeature)?.slice(0, 100) ?? undefined,
+      lastFailedStage: normalizeOptionalString(payload.lastFailedStage)?.slice(0, 100) ?? undefined,
+      lastFailedDetectedAt: normalizeOptionalString(payload.lastFailedDetectedAt)?.slice(0, 100) ?? undefined,
     } satisfies HeartbeatInput,
   };
 }

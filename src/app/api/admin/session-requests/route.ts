@@ -28,6 +28,14 @@ type PendingRequestRow = {
   subs: { label: string } | { label: string }[] | null;
 };
 
+type RequestDeviceRow = {
+  android_release: string | null;
+  android_sdk_int: number | null;
+  device_manufacturer: string | null;
+  device_model: string | null;
+  sub_id: string | null;
+};
+
 function extractSubLabel(value: PendingRequestRow["subs"]) {
   if (Array.isArray(value)) {
     return value[0]?.label ?? null;
@@ -63,23 +71,53 @@ export async function GET(request: Request) {
     return jsonSupabaseError("Failed to load pending session requests.", error);
   }
 
+  const rows = data ?? [];
+  const subIds = rows.map((row) => row.sub_id).filter((subId): subId is string => subId !== null);
+  const deviceBySubId = new Map<string, RequestDeviceRow>();
+
+  if (subIds.length > 0) {
+    const { data: deviceRows, error: deviceError } = await supabase
+      .from("devices")
+      .select("sub_id, device_manufacturer, device_model, android_release, android_sdk_int")
+      .in("sub_id", subIds)
+      .returns<RequestDeviceRow[]>();
+
+    if (deviceError) {
+      return jsonSupabaseError("Failed to load device info for session requests.", deviceError);
+    }
+
+    for (const row of deviceRows ?? []) {
+      if (row.sub_id) {
+        deviceBySubId.set(row.sub_id, row);
+      }
+    }
+  }
+
   return jsonOk({
     ok: true,
-    requests: (data ?? []).map((row) => ({
-      approved_at: row.approved_at,
-      always_allowed_package: row.always_allowed_package,
-      created_at: row.created_at,
-      daily_limit_minutes: row.daily_limit_minutes,
-      device_name: row.device_name,
-      forced_sleep_enabled: row.forced_sleep_enabled,
-      full_discretion: row.full_discretion,
-      gallery_access_enabled: row.gallery_access_enabled,
-      id: row.id,
-      requested_days: row.requested_days,
-      screen_time_enabled: row.screen_time_enabled,
-      status: row.status,
-      sub_id: row.sub_id,
-      sub_label: extractSubLabel(row.subs),
-    })),
+    requests: rows.map((row) => {
+      const device = row.sub_id ? deviceBySubId.get(row.sub_id) : undefined;
+
+      return {
+        approved_at: row.approved_at,
+        always_allowed_package: row.always_allowed_package,
+        android_release: device?.android_release ?? null,
+        android_sdk_int: device?.android_sdk_int ?? null,
+        created_at: row.created_at,
+        daily_limit_minutes: row.daily_limit_minutes,
+        device_manufacturer: device?.device_manufacturer ?? null,
+        device_model: device?.device_model ?? null,
+        device_name: row.device_name,
+        forced_sleep_enabled: row.forced_sleep_enabled,
+        full_discretion: row.full_discretion,
+        gallery_access_enabled: row.gallery_access_enabled,
+        id: row.id,
+        requested_days: row.requested_days,
+        screen_time_enabled: row.screen_time_enabled,
+        status: row.status,
+        sub_id: row.sub_id,
+        sub_label: extractSubLabel(row.subs),
+      };
+    }),
   });
 }

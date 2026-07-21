@@ -14,6 +14,8 @@ export const dynamic = "force-dynamic";
 type CrashReportRow = {
   app_version_code: number | null;
   app_version_name: string | null;
+  crashed_during_feature: string | null;
+  crashed_during_stage: string | null;
   created_at: string;
   device_id: string | null;
   device_model: string | null;
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("crash_reports")
     .select(
-      "id, device_id, sub_id, platform, app_version_code, app_version_name, device_model, os_version, exception_summary, stack_trace, occurred_at, created_at, devices(device_name), subs(label)",
+      "id, device_id, sub_id, platform, app_version_code, app_version_name, device_model, os_version, exception_summary, stack_trace, occurred_at, created_at, crashed_during_feature, crashed_during_stage, devices(device_name), subs(label)",
     )
     .order("created_at", { ascending: false })
     .limit(100)
@@ -68,6 +70,8 @@ export async function GET(request: Request) {
     reports: (data ?? []).map((row) => ({
       appVersionCode: row.app_version_code,
       appVersionName: row.app_version_name,
+      crashedDuringFeature: row.crashed_during_feature,
+      crashedDuringStage: row.crashed_during_stage,
       createdAt: row.created_at,
       deviceModel: row.device_model,
       deviceName: extractDeviceName(row.devices),

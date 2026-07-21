@@ -181,6 +181,22 @@ create unique index if not exists devices_hardware_id_hash_key
   on public.devices (hardware_id_hash)
   where hardware_id_hash is not null;
 
+-- Self-reported by Android at registration (Build.MANUFACTURER/MODEL/VERSION), not user-editable.
+-- Lets the keyholder see what device/OS a sub is on without having to ask -- most "it doesn't work
+-- for me" reports turn out to be device/OS-specific (e.g. Android 13+ Restricted Settings blocking
+-- Accessibility on sideloaded installs) rather than a real bug.
+alter table public.devices
+  add column if not exists device_manufacturer text;
+
+alter table public.devices
+  add column if not exists device_model text;
+
+alter table public.devices
+  add column if not exists android_release text;
+
+alter table public.devices
+  add column if not exists android_sdk_int integer;
+
 -- Latest-known-location only (no history table) -- periodic background reports overwrite
 -- these each time, matching how last_seen_at already works for heartbeats.
 alter table public.devices
@@ -613,6 +629,19 @@ alter table if exists public.device_heartbeats
 alter table if exists public.device_heartbeats
   add column if not exists persistence_penalty_until timestamptz;
 
+-- Set only when the previous app process began a bracketed operation (see
+-- OperationStageTracking.kt on Android) and never finished it -- evidence the process died
+-- mid-operation. Cleared client-side after one successful heartbeat, so this is "did it happen
+-- since the last time we heard from this device", not a running total.
+alter table if exists public.device_heartbeats
+  add column if not exists last_failed_feature text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_failed_stage text;
+
+alter table if exists public.device_heartbeats
+  add column if not exists last_failed_detected_at timestamptz;
+
 create index if not exists device_heartbeats_received_at_idx
   on public.device_heartbeats (received_at desc);
 
@@ -707,6 +736,15 @@ create table if not exists public.crash_reports (
 
 create index if not exists crash_reports_created_at_idx
   on public.crash_reports (created_at desc);
+
+-- Which bracketed operation (see OperationStageTracking.kt on Android) hadn't finished yet at the
+-- moment of the crash, if any -- distinct from the stack trace, which shows where but not which
+-- higher-level feature/flow was in flight.
+alter table public.crash_reports
+  add column if not exists crashed_during_feature text;
+
+alter table public.crash_reports
+  add column if not exists crashed_during_stage text;
 
 drop trigger if exists set_session_requests_updated_at on public.session_requests;
 create trigger set_session_requests_updated_at

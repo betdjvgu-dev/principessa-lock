@@ -106,6 +106,9 @@ export async function POST(request: Request) {
     inside_sleep_window: heartbeat.insideSleepWindow ?? null,
     inside_persistence_penalty: heartbeat.insidePersistencePenalty ?? null,
     persistence_penalty_until: parseTimestampOrNull(heartbeat.persistencePenaltyUntil),
+    last_failed_feature: heartbeat.lastFailedFeature ?? null,
+    last_failed_stage: heartbeat.lastFailedStage ?? null,
+    last_failed_detected_at: parseTimestampOrNull(heartbeat.lastFailedDetectedAt),
     last_accessibility_event_at: parseTimestampOrNull(heartbeat.lastAccessibilityEventAt),
     last_protection_tick_at: parseTimestampOrNull(heartbeat.lastProtectionTickAt),
     last_remote_action_check_at: parseTimestampOrNull(heartbeat.lastRemoteActionCheckAt),
@@ -151,12 +154,20 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Failed to store heartbeat.", insertError);
   }
 
+  // device_manufacturer/model/android_release/android_sdk_int are overwritten on every heartbeat
+  // (not just at registration) so a device that registered before these columns existed gets
+  // backfilled automatically, and a later OS update is reflected here instead of the dashboard
+  // showing a permanently stale Android version.
   const { error: updateError } = await supabase
     .from("devices")
     .update({
       device_name: heartbeat.deviceName,
       last_seen_at: new Date().toISOString(),
       timezone: heartbeat.timezone ?? null,
+      ...(heartbeat.deviceManufacturer !== undefined ? { device_manufacturer: heartbeat.deviceManufacturer } : {}),
+      ...(heartbeat.deviceModel !== undefined ? { device_model: heartbeat.deviceModel } : {}),
+      ...(heartbeat.androidRelease !== undefined ? { android_release: heartbeat.androidRelease } : {}),
+      ...(heartbeat.androidSdkInt !== undefined ? { android_sdk_int: heartbeat.androidSdkInt } : {}),
     })
     .eq("id", deviceAuth.device.id);
 

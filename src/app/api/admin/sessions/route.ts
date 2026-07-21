@@ -14,6 +14,9 @@ export const dynamic = "force-dynamic";
 type SessionHeartbeatSummaryRow = {
   blocking_active: boolean | null;
   daily_limit_minutes: number | null;
+  last_failed_detected_at: string | null;
+  last_failed_feature: string | null;
+  last_failed_stage: string | null;
   protection_health_level: string | null;
   protection_health_status: string | null;
   protection_state: string | null;
@@ -38,8 +41,12 @@ type SessionRow = {
   content_filter_enabled: boolean;
   weekday_overrides: Record<string, unknown>;
   config_version: number;
+  android_release: string | null;
+  android_sdk_int: number | null;
   daily_limit_minutes: number;
   device_id: string;
+  device_manufacturer: string | null;
+  device_model: string | null;
   device_name: string | null;
   device_location: DeviceLocation;
   recent_dns_queries: RawDnsQueryEntry[];
@@ -77,6 +84,10 @@ type RawInstalledApp = {
 };
 
 type RawDevice = {
+  android_release: string | null;
+  android_sdk_int: number | null;
+  device_manufacturer: string | null;
+  device_model: string | null;
   device_name: string;
   last_latitude: number | null;
   last_longitude: number | null;
@@ -130,6 +141,22 @@ function extractDeviceName(value: RawSessionRow["devices"]) {
   return extractDevice(value)?.device_name ?? null;
 }
 
+function extractDeviceManufacturer(value: RawSessionRow["devices"]) {
+  return extractDevice(value)?.device_manufacturer ?? null;
+}
+
+function extractDeviceModel(value: RawSessionRow["devices"]) {
+  return extractDevice(value)?.device_model ?? null;
+}
+
+function extractAndroidRelease(value: RawSessionRow["devices"]) {
+  return extractDevice(value)?.android_release ?? null;
+}
+
+function extractAndroidSdkInt(value: RawSessionRow["devices"]) {
+  return extractDevice(value)?.android_sdk_int ?? null;
+}
+
 function extractDeviceLocation(value: RawSessionRow["devices"]): DeviceLocation {
   const device = extractDevice(value);
 
@@ -178,7 +205,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -191,6 +218,8 @@ export async function GET(request: Request) {
   const sessions: SessionRow[] = (data ?? []).map((session) => ({
     activated_at: session.activated_at,
     always_allowed_package: session.always_allowed_package,
+    android_release: extractAndroidRelease(session.devices),
+    android_sdk_int: extractAndroidSdkInt(session.devices),
     blocked_packages: session.blocked_packages,
     blocked_domains: session.blocked_domains,
     content_filter_enabled: session.content_filter_enabled,
@@ -198,6 +227,8 @@ export async function GET(request: Request) {
     config_version: session.config_version,
     daily_limit_minutes: session.daily_limit_minutes,
     device_id: session.device_id,
+    device_manufacturer: extractDeviceManufacturer(session.devices),
+    device_model: extractDeviceModel(session.devices),
     device_name: extractDeviceName(session.devices),
     device_location: extractDeviceLocation(session.devices),
     recent_dns_queries: extractRecentDnsQueries(session.devices),
@@ -234,7 +265,7 @@ export async function GET(request: Request) {
   const { data: heartbeatRows, error: heartbeatError } = await supabase
     .from("device_heartbeats")
     .select(
-      "session_id, received_at, used_minutes, daily_limit_minutes, remaining_minutes, protection_state, protection_health_level, protection_health_status, blocking_active",
+      "session_id, received_at, used_minutes, daily_limit_minutes, remaining_minutes, protection_state, protection_health_level, protection_health_status, blocking_active, last_failed_feature, last_failed_stage, last_failed_detected_at",
     )
     .in("session_id", sessionIds)
     .order("received_at", { ascending: false })
@@ -284,6 +315,9 @@ export async function GET(request: Request) {
           ? {
               blocking_active: latestHeartbeat.blocking_active,
               daily_limit_minutes: latestHeartbeat.daily_limit_minutes,
+              last_failed_detected_at: latestHeartbeat.last_failed_detected_at,
+              last_failed_feature: latestHeartbeat.last_failed_feature,
+              last_failed_stage: latestHeartbeat.last_failed_stage,
               protection_health:
                 latestHeartbeat.protection_health_level ?? latestHeartbeat.protection_health_status ?? null,
               protection_state: latestHeartbeat.protection_state,
