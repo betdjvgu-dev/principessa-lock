@@ -120,7 +120,6 @@ export async function POST(request: Request) {
     limit_reached: heartbeat.limitReached ?? null,
     local_date: heartbeat.localDate ?? null,
     network_connected: heartbeat.networkConnected ?? null,
-    notification_access_granted: heartbeat.notificationAccessGranted ?? null,
     activity_recognition_granted: heartbeat.activityRecognitionGranted ?? null,
     overlay_active: heartbeat.overlayActive ?? null,
     overlay_permission_granted: heartbeat.overlayPermissionGranted ?? null,

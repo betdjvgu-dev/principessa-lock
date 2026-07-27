@@ -136,7 +136,6 @@ export type HeartbeatInput = {
   limitReached?: boolean;
   localDate?: string;
   networkConnected?: boolean;
-  notificationAccessGranted?: boolean;
   activityRecognitionGranted?: boolean;
   overlayActive?: boolean;
   overlayPermissionGranted?: boolean;
@@ -804,7 +803,6 @@ export function validateHeartbeatInput(input: unknown) {
     !isOptionalBoolean(payload.overlayPermissionGranted) ||
     !isOptionalBoolean(payload.overlayReady) ||
     !isOptionalBoolean(payload.overlayActive) ||
-    !isOptionalBoolean(payload.notificationAccessGranted) ||
     !isOptionalBoolean(payload.activityRecognitionGranted) ||
     !isOptionalBoolean(payload.autostartAcknowledged) ||
     !isOptionalBoolean(payload.networkConnected) ||
@@ -957,7 +955,6 @@ export function validateHeartbeatInput(input: unknown) {
       limitReached: payload.limitReached as boolean | undefined,
       localDate: normalizeOptionalString(payload.localDate) ?? undefined,
       networkConnected: payload.networkConnected as boolean | undefined,
-      notificationAccessGranted: payload.notificationAccessGranted as boolean | undefined,
       activityRecognitionGranted: payload.activityRecognitionGranted as boolean | undefined,
       overlayActive: payload.overlayActive as boolean | undefined,
       overlayPermissionGranted: payload.overlayPermissionGranted as boolean | undefined,
