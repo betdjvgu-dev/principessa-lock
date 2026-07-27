@@ -50,6 +50,7 @@ type SessionRow = {
   device_name: string | null;
   device_location: DeviceLocation;
   recent_dns_queries: RawDnsQueryEntry[];
+  top_dns_domains: TopDnsDomain[];
   installed_apps: RawInstalledApp[];
   ends_at: string;
   forced_sleep_enabled: boolean;
@@ -78,6 +79,13 @@ type RawDnsQueryEntry = {
   queriedAt: string;
 };
 
+type TopDnsDomain = {
+  count: number;
+  domain: string;
+};
+
+const MAX_TOP_DNS_DOMAINS = 20;
+
 type RawInstalledApp = {
   appName: string;
   packageName: string;
@@ -94,6 +102,7 @@ type RawDevice = {
   last_location_accuracy_m: number | null;
   last_location_at: string | null;
   recent_dns_queries: RawDnsQueryEntry[] | null;
+  dns_domain_query_counts: Record<string, number> | null;
   installed_apps: RawInstalledApp[] | null;
 };
 
@@ -176,6 +185,14 @@ function extractRecentDnsQueries(value: RawSessionRow["devices"]): RawDnsQueryEn
   return extractDevice(value)?.recent_dns_queries ?? [];
 }
 
+function extractTopDnsDomains(value: RawSessionRow["devices"]): TopDnsDomain[] {
+  const counts = extractDevice(value)?.dns_domain_query_counts ?? {};
+  return Object.entries(counts)
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, MAX_TOP_DNS_DOMAINS);
+}
+
 function extractInstalledApps(value: RawSessionRow["devices"]): RawInstalledApp[] {
   return extractDevice(value)?.installed_apps ?? [];
 }
@@ -205,7 +222,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, installed_apps), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, dns_domain_query_counts, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .limit(50)
@@ -232,6 +249,7 @@ export async function GET(request: Request) {
     device_name: extractDeviceName(session.devices),
     device_location: extractDeviceLocation(session.devices),
     recent_dns_queries: extractRecentDnsQueries(session.devices),
+    top_dns_domains: extractTopDnsDomains(session.devices),
     installed_apps: extractInstalledApps(session.devices),
     ends_at: session.ends_at,
     forced_sleep_enabled: session.forced_sleep_enabled,

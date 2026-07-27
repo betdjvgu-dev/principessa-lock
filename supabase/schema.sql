@@ -217,6 +217,13 @@ alter table public.devices
 alter table public.devices
   add column if not exists recent_dns_queries jsonb not null default '[]'::jsonb;
 
+-- Per-domain lookup counts, accumulated forever (never FIFO-trimmed like recent_dns_queries
+-- above) -- powers a "most visited websites" view for the keyholder, the RionLock-style
+-- feature recent_dns_queries' small rolling window can't support on its own since it only
+-- ever holds the last 50 raw lookups regardless of how long a domain's actually been queried.
+alter table public.devices
+  add column if not exists dns_domain_query_counts jsonb not null default '{}'::jsonb;
+
 -- Full snapshot of user-visible installed apps (package name + label), overwritten on each
 -- report -- lets the keyholder pick apps to block from a list instead of typing package
 -- names blind.

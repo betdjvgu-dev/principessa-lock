@@ -58,9 +58,9 @@ export async function POST(request: Request) {
 
   const { data: existingDevice, error: loadError } = await supabase
     .from("devices")
-    .select("recent_dns_queries")
+    .select("recent_dns_queries, dns_domain_query_counts")
     .eq("id", deviceAuth.device.id)
-    .maybeSingle<{ recent_dns_queries: StoredDnsQueryEntry[] | null }>();
+    .maybeSingle<{ recent_dns_queries: StoredDnsQueryEntry[] | null; dns_domain_query_counts: Record<string, number> | null }>();
 
   if (loadError) {
     return jsonSupabaseError("Failed to load existing DNS query log.", loadError);
@@ -68,9 +68,18 @@ export async function POST(request: Request) {
 
   const merged = [...(existingDevice?.recent_dns_queries ?? []), ...validation.data.queries].slice(-MAX_STORED_ENTRIES);
 
+  // Unlike recent_dns_queries above (a small FIFO-trimmed window), this count map is never
+  // trimmed by size -- it's what actually powers a "most visited websites" view, since 50
+  // raw entries gets overwritten within a handful of page loads and can't reflect which
+  // domains were visited most over the life of the session.
+  const domainCounts = { ...(existingDevice?.dns_domain_query_counts ?? {}) };
+  for (const query of validation.data.queries) {
+    domainCounts[query.domain] = (domainCounts[query.domain] ?? 0) + 1;
+  }
+
   const { error: updateError } = await supabase
     .from("devices")
-    .update({ recent_dns_queries: merged })
+    .update({ recent_dns_queries: merged, dns_domain_query_counts: domainCounts })
     .eq("id", deviceAuth.device.id);
 
   if (updateError) {
