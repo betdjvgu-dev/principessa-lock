@@ -54,6 +54,12 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonError(404, "Session request not found.");
   }
 
+  // Diagnostic: approvals have been failing with "no longer pending" on rows that stay pending.
+  // This records what the read actually saw, to pair with the update result logged below.
+  console.error(
+    `[diag] approve id=${id} read_status=${sessionRequest.status} full_discretion=${sessionRequest.full_discretion}`,
+  );
+
   if (sessionRequest.status !== "pending") {
     return jsonError(409, "Only pending session requests can be approved.");
   }
@@ -118,6 +124,12 @@ export async function POST(request: Request, context: RouteContext) {
   if (updateError) {
     return jsonSupabaseError("Failed to approve session request.", updateError);
   }
+
+  // The read above said pending; if this matched nothing, the conditional UPDATE and the SELECT
+  // disagreed about the same row - which is the thing that needs explaining.
+  console.error(
+    `[diag] approve id=${id} update_matched=${updatedRequest ? "1" : "0"} new_status=${updatedRequest?.status ?? "-"}`,
+  );
 
   if (!updatedRequest) {
     return jsonError(409, "Session request is no longer pending.");

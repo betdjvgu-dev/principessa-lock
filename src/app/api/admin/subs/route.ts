@@ -54,6 +54,10 @@ export async function GET(request: Request) {
 
   const subs = data ?? [];
 
+  // Diagnostic: same intermittent empty-but-200 behaviour seen on admin/sessions. A zero here
+  // means Supabase itself returned nothing for an unfiltered select.
+  console.error(`[diag] admin/subs raw_rows=${data === null ? "null" : data.length}`);
+
   if (subs.length === 0) {
     return jsonOk({ ok: true, subs: [] });
   }

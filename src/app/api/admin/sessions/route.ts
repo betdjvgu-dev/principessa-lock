@@ -232,6 +232,11 @@ export async function GET(request: Request) {
     return jsonSupabaseError("Failed to load sessions.", error);
   }
 
+  // Diagnostic: this route intermittently answers 200 with an empty list while rows exist in the
+  // database, which reads to the keyholder as "every session disappeared". Logging the raw row
+  // count separates "Supabase returned nothing" from "the mapping below dropped them".
+  console.error(`[diag] admin/sessions raw_rows=${data === null ? "null" : data.length}`);
+
   const sessions: SessionRow[] = (data ?? []).map((session) => ({
     activated_at: session.activated_at,
     always_allowed_package: session.always_allowed_package,
