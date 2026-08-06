@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
-import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -39,7 +39,9 @@ export async function POST(request: Request) {
     return jsonError(400, "refreshToken is required.");
   }
 
-  const supabase = getSupabaseAdminClient();
+  // Isolated: refreshing establishes a session on the client, which must not leak into the
+  // shared service-role client used for data access.
+  const supabase = createIsolatedSupabaseClient();
   const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
 
   if (error || !data.session) {

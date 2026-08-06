@@ -2,7 +2,7 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { getServerEnv, getSupabaseAnonKey } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
-import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -42,7 +42,9 @@ export async function POST(request: Request) {
     return jsonError(400, "email and password are required.");
   }
 
-  const supabase = getSupabaseAdminClient();
+  // Isolated on purpose: signing in rebinds the client's PostgREST Authorization header to the
+  // user's JWT, and the shared admin client is reused by every other route in this container.
+  const supabase = createIsolatedSupabaseClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error || !data.session) {

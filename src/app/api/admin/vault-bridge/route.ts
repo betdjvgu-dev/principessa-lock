@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
-import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +71,10 @@ export async function POST(request: Request) {
     return jsonError(401, "This Vault Mistress session is not an authorized admin session.");
   }
 
-  const supabase = getSupabaseAdminClient();
+  // Isolated: verifyOtp below signs in, which rebinds this client's PostgREST Authorization
+  // header to the minted user session. On the shared admin client that would make every
+  // subsequent query in this container run as `authenticated` instead of service_role.
+  const supabase = createIsolatedSupabaseClient();
 
   // generateLink + verifyOtp mints a session without this backend ever storing the admin's
   // password. The link is consumed immediately here and never leaves the server.
