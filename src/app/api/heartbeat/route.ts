@@ -198,7 +198,18 @@ export async function POST(request: Request) {
   }
   const protectionJustBrokeDown = previousHeartbeat?.protection_healthy === true && heartbeat.protectionHealthy === false;
 
-  if (lostPermissions.length > 0 || protectionJustBrokeDown) {
+  // settings_tamper_attempt alone flips protectionHealthy false whenever App Info / Settings is
+  // PIN-walled -- that is expected enforcement, not a silent escape. Pushing the keyholder's
+  // Vault companion (admin_push_tokens) for every PIN wall was pure noise; real permission losses
+  // and other broken reasons still alert below.
+  const brokenReasons = heartbeat.protectionBrokenReasons ?? [];
+  const onlySettingsTamper =
+    brokenReasons.length > 0 &&
+    brokenReasons.every((reason) => reason === "settings_tamper_attempt");
+  const shouldAlertKeyholder =
+    lostPermissions.length > 0 || (protectionJustBrokeDown && !onlySettingsTamper);
+
+  if (shouldAlertKeyholder) {
     const reason = lostPermissions.length > 0 ? lostPermissions.join(", ") : "Protection health degraded";
     const { data: adminToken } = await supabase
       .from("admin_push_tokens")
