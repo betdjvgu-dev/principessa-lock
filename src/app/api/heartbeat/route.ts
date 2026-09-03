@@ -13,6 +13,9 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 // request here out of that cache entirely.
 export const dynamic = "force-dynamic";
 
+/** How long the same tamper reason stays muted for one device before it can alert again. */
+const TAMPER_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
+
 function parseTimestampOrNull(value: string | undefined) {
   if (!value) {
     return null;
@@ -211,12 +214,36 @@ export async function POST(request: Request) {
 
   if (shouldAlertKeyholder) {
     const reason = lostPermissions.length > 0 ? lostPermissions.join(", ") : "Protection health degraded";
-    const { data: adminToken } = await supabase
-      .from("admin_push_tokens")
-      .select("fcm_token")
-      .maybeSingle<{ fcm_token: string | null }>();
 
-    await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
+    // The edge trigger above is necessary but not sufficient. OEM battery management kills and
+    // restarts the accessibility service repeatedly, and every restart is a genuine true->false
+    // transition, so the keyholder's phone was buzzing continuously for one device that had
+    // nothing new wrong with it. Repeat the *same* reason for a device at most once per cooldown
+    // window; a different reason is new information and still alerts immediately.
+    const { data: alertState } = await supabase
+      .from("devices")
+      .select("last_tamper_alert_at, last_tamper_alert_reason")
+      .eq("id", deviceAuth.device.id)
+      .maybeSingle<{ last_tamper_alert_at: string | null; last_tamper_alert_reason: string | null }>();
+
+    const lastAlertAt = alertState?.last_tamper_alert_at ? new Date(alertState.last_tamper_alert_at).getTime() : 0;
+    const repeatOfMutedReason =
+      alertState?.last_tamper_alert_reason === reason &&
+      Date.now() - lastAlertAt < TAMPER_ALERT_COOLDOWN_MS;
+
+    if (!repeatOfMutedReason) {
+      const { data: adminToken } = await supabase
+        .from("admin_push_tokens")
+        .select("fcm_token")
+        .maybeSingle<{ fcm_token: string | null }>();
+
+      await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
+
+      await supabase
+        .from("devices")
+        .update({ last_tamper_alert_at: new Date().toISOString(), last_tamper_alert_reason: reason })
+        .eq("id", deviceAuth.device.id);
+    }
   }
 
   // Best-effort: only the fields needed for the usage-history chart. Missing any of them

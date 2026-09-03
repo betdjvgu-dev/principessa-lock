@@ -164,6 +164,13 @@ alter table public.devices
 alter table public.devices
   add column if not exists sub_id uuid references public.subs(id) on delete cascade;
 
+-- Last keyholder tamper push for this device, used to mute repeats of the same reason.
+alter table public.devices
+  add column if not exists last_tamper_alert_at timestamptz;
+
+alter table public.devices
+  add column if not exists last_tamper_alert_reason text;
+
 -- A device name is chosen once at self-registration alongside the username and can't be
 -- reused afterward either, same as username -- both together are what identifies a sub, so
 -- letting either be claimed twice would let someone impersonate an existing registration.
