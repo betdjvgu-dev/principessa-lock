@@ -60,9 +60,9 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("ends_at, paused_at")
+    .select("ends_at, paused_at, status")
     .eq("id", id)
-    .maybeSingle<{ ends_at: string; paused_at: string | null }>();
+    .maybeSingle<{ ends_at: string; paused_at: string | null; status: string }>();
 
   if (sessionError) {
     return jsonSupabaseError("Failed to load session.", sessionError);
@@ -71,6 +71,8 @@ export async function POST(request: Request, context: RouteContext) {
   if (!session) {
     return jsonError(404, "Session not found.");
   }
+
+  if (session.status !== "active") return jsonError(409, "Session is not active.");
 
   if (!session.paused_at) {
     // Already resumed (e.g. a retried tick) -- report the current ends_at rather than erroring,
@@ -85,7 +87,9 @@ export async function POST(request: Request, context: RouteContext) {
     .from("sessions")
     .update({ ends_at: newEndsAt, paused_at: null })
     .eq("id", id)
-    .not("paused_at", "is", null)
+    .eq("status", "active")
+    .eq("paused_at", session.paused_at)
+    .eq("ends_at", session.ends_at)
     .select("ends_at")
     .maybeSingle<{ ends_at: string }>();
 
@@ -93,5 +97,11 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonSupabaseError("Failed to resume session.", updateError);
   }
 
-  return jsonOk({ ok: true, endsAt: updated?.ends_at ?? newEndsAt, pausedAt: null });
+  if (updated) return jsonOk({ ok: true, endsAt: updated.ends_at, pausedAt: null });
+  const { data: current, error: currentError } = await supabase.from("sessions")
+    .select("ends_at, paused_at, status").eq("id", id)
+    .maybeSingle<{ ends_at: string; paused_at: string | null; status: string }>();
+  if (currentError) return jsonSupabaseError("Failed to confirm resume.", currentError);
+  if (!current || current.status !== "active" || current.paused_at) return jsonError(409, "Session changed. Sync and retry.");
+  return jsonOk({ ok: true, endsAt: current.ends_at, pausedAt: null });
 }

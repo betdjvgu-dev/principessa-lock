@@ -5,6 +5,7 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateHeartbeatInput, type HeartbeatInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { mergeProtectionAlert, protectionAlertDue, protectionAlertReason } from "@/lib/server/protection-alert";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -12,9 +13,6 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 // snapshot until a later request happened to bypass the cache. force-dynamic opts every
 // request here out of that cache entirely.
 export const dynamic = "force-dynamic";
-
-/** How long the same tamper reason stays muted for one device before it can alert again. */
-const TAMPER_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 
 function parseTimestampOrNull(value: string | undefined) {
   if (!value) {
@@ -177,73 +175,58 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Heartbeat was stored but device last seen update failed.", updateError);
   }
 
-  // Only fires on a true-to-false *transition* (not "still false from before"), so a sub who's
-  // simply never granted an optional permission doesn't page the keyholder on every heartbeat --
-  // only an actual loss does. accessibility_running (the service process still being alive) is
-  // tracked separately from accessibility_granted (the permission itself) because an OEM can kill
-  // the running service via aggressive battery/background restrictions without the permission
-  // grant ever being revoked -- that's a real, silent gap otherwise.
-  const lostPermissions: string[] = [];
-  if (previousHeartbeat?.accessibility_granted === true && heartbeat.accessibilityGranted === false) {
-    lostPermissions.push("Accessibility permission revoked");
-  }
-  if (previousHeartbeat?.accessibility_running === true && heartbeat.accessibilityRunning === false) {
-    lostPermissions.push("Accessibility service stopped running");
-  }
-  if (previousHeartbeat?.overlay_permission_granted === true && heartbeat.overlayPermissionGranted === false) {
-    lostPermissions.push("Display-over-other-apps revoked");
-  }
-  if (previousHeartbeat?.device_admin_granted === true && heartbeat.deviceAdminGranted === false) {
-    lostPermissions.push("Device admin revoked");
-  }
-  if (previousHeartbeat?.usage_access_granted === true && heartbeat.usageAccessGranted === false) {
-    lostPermissions.push("Usage access revoked");
-  }
-  const protectionJustBrokeDown = previousHeartbeat?.protection_healthy === true && heartbeat.protectionHealthy === false;
-
-  // settings_tamper_attempt alone flips protectionHealthy false whenever App Info / Settings is
-  // PIN-walled -- that is expected enforcement, not a silent escape. Pushing the keyholder's
-  // Vault companion (admin_push_tokens) for every PIN wall was pure noise; real permission losses
-  // and other broken reasons still alert below.
+  // Persist a transition until FCM accepts it. A later heartbeat can retry even if the
+  // permission is still missing (there is no second true -> false transition).
   const brokenReasons = heartbeat.protectionBrokenReasons ?? [];
   const onlySettingsTamper =
     brokenReasons.length > 0 &&
     brokenReasons.every((reason) => reason === "settings_tamper_attempt");
-  const shouldAlertKeyholder =
-    lostPermissions.length > 0 || (protectionJustBrokeDown && !onlySettingsTamper);
-
-  if (shouldAlertKeyholder) {
-    const reason = lostPermissions.length > 0 ? lostPermissions.join(", ") : "Protection health degraded";
-
-    // The edge trigger above is necessary but not sufficient. OEM battery management kills and
-    // restarts the accessibility service repeatedly, and every restart is a genuine true->false
-    // transition, so the keyholder's phone was buzzing continuously for one device that had
-    // nothing new wrong with it. Repeat the *same* reason for a device at most once per cooldown
-    // window; a different reason is new information and still alerts immediately.
-    const { data: alertState } = await supabase
+  try {
+    const { data: alertState, error: alertError } = await supabase
       .from("devices")
-      .select("last_tamper_alert_at, last_tamper_alert_reason")
+      .select("last_tamper_alert_at, last_tamper_alert_reason, pending_protection_alert, last_protection_alert_attempt_at")
       .eq("id", deviceAuth.device.id)
-      .maybeSingle<{ last_tamper_alert_at: string | null; last_tamper_alert_reason: string | null }>();
+      .maybeSingle<{
+        last_tamper_alert_at: string | null; last_tamper_alert_reason: string | null;
+        pending_protection_alert: unknown; last_protection_alert_attempt_at: string | null;
+      }>();
+    if (alertError) throw alertError;
+    const pending = heartbeat.sessionStatus !== "active" ? null : mergeProtectionAlert(
+      alertState?.pending_protection_alert, heartbeat.sessionId, previousHeartbeat, {
+        accessibility_granted: heartbeat.accessibilityGranted,
+        accessibility_running: heartbeat.accessibilityRunning,
+        overlay_permission_granted: heartbeat.overlayPermissionGranted,
+        device_admin_granted: heartbeat.deviceAdminGranted,
+        usage_access_granted: heartbeat.usageAccessGranted,
+        protection_healthy: onlySettingsTamper ? true : heartbeat.protectionHealthy,
+      },
+    );
+    const { error: pendingError } = await supabase.from("devices")
+      .update({ pending_protection_alert: pending }).eq("id", deviceAuth.device.id);
+    if (pendingError) throw pendingError;
 
-    const lastAlertAt = alertState?.last_tamper_alert_at ? new Date(alertState.last_tamper_alert_at).getTime() : 0;
-    const repeatOfMutedReason =
-      alertState?.last_tamper_alert_reason === reason &&
-      Date.now() - lastAlertAt < TAMPER_ALERT_COOLDOWN_MS;
-
-    if (!repeatOfMutedReason) {
-      const { data: adminToken } = await supabase
-        .from("admin_push_tokens")
-        .select("fcm_token")
-        .maybeSingle<{ fcm_token: string | null }>();
-
-      await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
-
-      await supabase
-        .from("devices")
-        .update({ last_tamper_alert_at: new Date().toISOString(), last_tamper_alert_reason: reason })
-        .eq("id", deviceAuth.device.id);
+    if (pending) {
+      const reason = protectionAlertReason(pending);
+      if (protectionAlertDue(Date.now(), alertState?.last_protection_alert_attempt_at ?? null,
+        alertState?.last_tamper_alert_at ?? null, alertState?.last_tamper_alert_reason ?? null, reason)) {
+        const { error: attemptError } = await supabase.from("devices")
+          .update({ last_protection_alert_attempt_at: new Date().toISOString() }).eq("id", deviceAuth.device.id);
+        if (attemptError) throw attemptError;
+        const { data: adminToken } = await supabase.from("admin_push_tokens")
+          .select("fcm_token").maybeSingle<{ fcm_token: string | null }>();
+        const accepted = await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
+        if (accepted) {
+          const { error: sentError } = await supabase.from("devices").update({
+            last_tamper_alert_at: new Date().toISOString(), last_tamper_alert_reason: reason,
+            pending_protection_alert: null,
+          }).eq("id", deviceAuth.device.id);
+          if (sentError) throw sentError;
+        }
+      }
     }
+  } catch (error) {
+    // Alert delivery is secondary: never turn a successfully stored heartbeat into a failure.
+    console.error("Protection alert could not be processed.", error);
   }
 
   // Best-effort: only the fields needed for the usage-history chart. Missing any of them

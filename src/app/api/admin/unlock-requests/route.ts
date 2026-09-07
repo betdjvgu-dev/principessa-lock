@@ -3,6 +3,7 @@ import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { readAllPages } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -49,14 +50,16 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const { data, error } = await readAllPages((from, to) => supabase
     .from("app_unlock_requests")
     .select(
       "id, session_id, device_id, sub_id, package_name, status, price_usd, requested_at, approved_at, rejected_at, expires_at, created_at, subs(label)",
     )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
-    .returns<PendingUnlockRequestRow[]>();
+    .order("id")
+    .range(from, to)
+    .returns<PendingUnlockRequestRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load pending unlock requests.", error);

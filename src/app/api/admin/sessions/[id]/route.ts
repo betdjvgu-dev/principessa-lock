@@ -209,6 +209,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     return jsonError(404, "Session not found.");
   }
 
+  if ((validation.data.expectedConfigVersion !== undefined && validation.data.expectedConfigVersion !== session.config_version)
+    || (validation.data.expectedUpdatedAt !== undefined && validation.data.expectedUpdatedAt !== session.updated_at)) {
+    return jsonError(409, "Session settings changed. Refresh and review your draft before saving.");
+  }
+
   if (session.status !== "active" && validation.data.status !== "revoked") {
     return jsonError(409, "Only active sessions can be updated.");
   }
@@ -228,6 +233,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     .from("sessions")
     .update(updatePayload)
     .eq("id", id)
+    .eq("config_version", session.config_version)
+    .eq("updated_at", session.updated_at)
+    .eq("status", session.status)
     .select(
       "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
     )
@@ -238,7 +246,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (!updatedSession) {
-    return jsonError(409, "Session could not be updated.");
+    return jsonError(409, "Session settings changed. Refresh and review your draft before saving.");
   }
 
   // Awaited (not fire-and-forget) since a serverless function isn't guaranteed to keep running

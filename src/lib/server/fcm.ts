@@ -39,23 +39,21 @@ function getFirebaseMessaging() {
  */
 async function sendDataPush(fcmToken: string | null | undefined, data: Record<string, string>) {
   if (!fcmToken) {
-    return;
-  }
-
-  const messaging = getFirebaseMessaging();
-
-  if (!messaging) {
-    return;
+    return false;
   }
 
   try {
+    const messaging = getFirebaseMessaging();
+    if (!messaging) return false;
     await messaging.send({
       android: { priority: "high" },
       data,
       token: fcmToken,
     });
+    return true;
   } catch (error) {
     console.error("Failed to send FCM push.", error);
+    return false;
   }
 }
 
@@ -104,5 +102,5 @@ export async function sendNewRegistrationPush(fcmToken: string | null | undefine
  *  was only visible if she happened to open the admin dashboard and noticed a status field
  *  herself, potentially long after the sub used the gap to uninstall or disable protection. */
 export async function sendProtectionTamperAlertPush(fcmToken: string | null | undefined, deviceName: string, reason: string) {
-  await sendDataPush(fcmToken, { deviceName, reason, type: "protection_tamper_alert" });
+  return sendDataPush(fcmToken, { deviceName, reason, type: "protection_tamper_alert" });
 }

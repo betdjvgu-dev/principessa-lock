@@ -203,6 +203,8 @@ export type WeekdayOverride = {
 };
 
 export type AdminSessionUpdateInput = {
+  expectedConfigVersion?: number;
+  expectedUpdatedAt?: string;
   alwaysAllowedPackage?: string | null;
   blockedDomains?: string[];
   blockedPackages?: string[];
@@ -1081,6 +1083,13 @@ export function validateAdminSessionUpdateInput(input: unknown) {
 
   const payload = input as Record<string, unknown>;
 
+  if (payload.expectedConfigVersion !== undefined && !isIntegerInRange(payload.expectedConfigVersion, 1, Number.MAX_SAFE_INTEGER)) {
+    return { ok: false as const, response: jsonError(400, "expectedConfigVersion must be a positive integer.") };
+  }
+  if (payload.expectedUpdatedAt !== undefined && (typeof payload.expectedUpdatedAt !== "string" || !Number.isFinite(Date.parse(payload.expectedUpdatedAt)))) {
+    return { ok: false as const, response: jsonError(400, "expectedUpdatedAt must be a valid timestamp.") };
+  }
+
   if (Object.keys(payload).length === 0) {
     return { ok: false as const, response: jsonError(400, "At least one session field must be provided.") };
   }
@@ -1254,6 +1263,8 @@ export function validateAdminSessionUpdateInput(input: unknown) {
         payload.alwaysAllowedPackage === null
           ? null
           : normalizeOptionalString(payload.alwaysAllowedPackage) ?? undefined,
+      expectedConfigVersion: payload.expectedConfigVersion as number | undefined,
+      expectedUpdatedAt: payload.expectedUpdatedAt as string | undefined,
       blockedDomains: (payload.blockedDomains as string[] | undefined)?.map((entry) => entry.trim().toLowerCase()),
       blockedPackages: (payload.blockedPackages as string[] | undefined)?.map((entry) => entry.trim()),
       contentFilterEnabled: payload.contentFilterEnabled as boolean | undefined,

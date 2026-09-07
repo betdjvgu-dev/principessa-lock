@@ -3,6 +3,7 @@ import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { readAllPages, chunks } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -104,13 +105,14 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("device_heartbeats")
+  const { data, error } = await readAllPages((from, to) => supabase
+    .from("latest_device_heartbeats")
     .select(
       "id, device_id, session_id, sub_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, inside_persistence_penalty, persistence_penalty_until, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, activity_recognition_granted, autostart_acknowledged, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length, root_detected, emulator_detected, debugger_attached",
     )
-    .order("received_at", { ascending: false })
-    .returns<HeartbeatRow[]>();
+    .order("status_key", { ascending: true })
+    .range(from, to)
+    .returns<HeartbeatRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load device status.", error);
@@ -137,12 +139,14 @@ export async function GET(request: Request) {
   const deviceInfoById = new Map<string, DeviceInfoRow>();
   const sessionIdentityById = new Map<string, SessionIdentityRow>();
 
-  if (sessionIds.length > 0) {
-    const { data: sessionRows, error: sessionError } = await supabase
+  for (const ids of chunks([...new Set(sessionIds)])) {
+    const { data: sessionRows, error: sessionError } = await readAllPages((from, to) => supabase
       .from("sessions")
       .select("id, device_id, sub_id")
-      .in("id", sessionIds)
-      .returns<SessionIdentityRow[]>();
+      .in("id", ids)
+      .order("id")
+      .range(from, to)
+      .returns<SessionIdentityRow[]>());
 
     if (sessionError) {
       return jsonSupabaseError("Failed to resolve heartbeat sessions.", sessionError);
@@ -160,12 +164,14 @@ export async function GET(request: Request) {
     }
   }
 
-  if (deviceIds.length > 0) {
-    const { data: deviceInfoRows, error: deviceInfoError } = await supabase
+  for (const ids of chunks([...new Set(deviceIds)])) {
+    const { data: deviceInfoRows, error: deviceInfoError } = await readAllPages((from, to) => supabase
       .from("devices")
       .select("id, device_name, sub_id, last_session_clear_reason, last_session_clear_at")
-      .in("id", deviceIds)
-      .returns<DeviceInfoRow[]>();
+      .in("id", ids)
+      .order("id")
+      .range(from, to)
+      .returns<DeviceInfoRow[]>());
 
     if (deviceInfoError) {
       return jsonSupabaseError("Failed to load device identity and session-clear history.", deviceInfoError);

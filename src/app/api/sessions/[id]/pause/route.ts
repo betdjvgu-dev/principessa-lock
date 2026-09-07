@@ -85,11 +85,18 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const pausedAt = new Date().toISOString();
-  const { error: updateError } = await supabase.from("sessions").update({ paused_at: pausedAt }).eq("id", id).is("paused_at", null);
+  const { data: updated, error: updateError } = await supabase.from("sessions")
+    .update({ paused_at: pausedAt }).eq("id", id).eq("status", "active").is("paused_at", null)
+    .select("paused_at").maybeSingle<{ paused_at: string }>();
 
   if (updateError) {
     return jsonSupabaseError("Failed to pause session.", updateError);
   }
 
-  return jsonOk({ ok: true, pausedAt });
+  if (updated) return jsonOk({ ok: true, pausedAt: updated.paused_at });
+  const { data: current, error: currentError } = await supabase.from("sessions")
+    .select("paused_at, status").eq("id", id).maybeSingle<{ paused_at: string | null; status: string }>();
+  if (currentError) return jsonSupabaseError("Failed to confirm pause.", currentError);
+  if (!current || current.status !== "active" || !current.paused_at) return jsonError(409, "Session changed. Sync and retry.");
+  return jsonOk({ ok: true, pausedAt: current.paused_at });
 }

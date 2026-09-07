@@ -3,6 +3,7 @@ import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { chunks, readAllPages } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -42,11 +43,13 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const { data, error } = await readAllPages((from, to) => supabase
     .from("subs")
     .select("id, label, status, created_at")
     .order("created_at", { ascending: false })
-    .returns<SubRow[]>();
+    .order("id")
+    .range(from, to)
+    .returns<SubRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load subs.", error);
@@ -66,23 +69,26 @@ export async function GET(request: Request) {
   // admin/sessions/route.ts) rather than a join -- a sub can exist with no device row yet
   // (registration failed after the subs insert) and PostgREST embeds turn that into null-shaped
   // noise that's more awkward to unpack than just merging by sub_id here.
-  const { data: deviceRows, error: deviceError } = await supabase
-    .from("devices")
-    .select("sub_id, device_manufacturer, device_model, android_release, android_sdk_int")
-    .in(
-      "sub_id",
-      subs.map((sub) => sub.id),
-    )
-    .returns<SubDeviceRow[]>();
-
-  if (deviceError) {
-    return jsonSupabaseError("Failed to load device info for subs.", deviceError);
-  }
-
   const deviceBySubId = new Map<string, SubDeviceRow>();
-  for (const row of deviceRows ?? []) {
-    if (row.sub_id) {
-      deviceBySubId.set(row.sub_id, row);
+  for (const ids of chunks(subs.map((sub) => sub.id))) {
+    const { data: deviceRows, error: deviceError } = await readAllPages((from, to) => supabase
+      .from("devices")
+      .select("sub_id, device_manufacturer, device_model, android_release, android_sdk_int")
+      .in("sub_id", ids)
+      .order("last_seen_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .order("id")
+      .range(from, to)
+      .returns<SubDeviceRow[]>());
+
+    if (deviceError) {
+      return jsonSupabaseError("Failed to load device info for subs.", deviceError);
+    }
+
+    for (const row of deviceRows ?? []) {
+      if (row.sub_id && !deviceBySubId.has(row.sub_id)) {
+        deviceBySubId.set(row.sub_id, row);
+      }
     }
   }
 

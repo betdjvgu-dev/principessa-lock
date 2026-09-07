@@ -3,6 +3,7 @@ import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { chunks, readAllPages } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -219,14 +220,15 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const { data, error } = await readAllPages((from, to) => supabase
     .from("sessions")
     .select(
       "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, dns_domain_query_counts, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
-    .limit(50)
-    .returns<RawSessionRow[]>();
+    .order("id")
+    .range(from, to)
+    .returns<RawSessionRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load sessions.", error);
@@ -285,45 +287,49 @@ export async function GET(request: Request) {
   }
 
   const sessionIds = sessions.map((session) => session.id);
-  const { data: heartbeatRows, error: heartbeatError } = await supabase
-    .from("device_heartbeats")
-    .select(
-      "session_id, received_at, used_minutes, daily_limit_minutes, remaining_minutes, protection_state, protection_health_level, protection_health_status, blocking_active, last_failed_feature, last_failed_stage, last_failed_detected_at",
-    )
-    .in("session_id", sessionIds)
-    .order("received_at", { ascending: false })
-    .returns<SessionHeartbeatSummaryRow[]>();
-
-  if (heartbeatError) {
-    return jsonSupabaseError("Failed to load session heartbeat summary.", heartbeatError);
-  }
-
   const latestHeartbeatBySession = new Map<string, SessionHeartbeatSummaryRow>();
+  const unreadMessageCountBySession = new Map<string, number>();
+  for (const ids of chunks(sessionIds)) {
+    const { data: heartbeatRows, error: heartbeatError } = await readAllPages((from, to) => supabase
+      .from("latest_session_heartbeats")
+      .select(
+        "session_id, received_at, used_minutes, daily_limit_minutes, remaining_minutes, protection_state, protection_health_level, protection_health_status, blocking_active, last_failed_feature, last_failed_stage, last_failed_detected_at",
+      )
+      .in("session_id", ids)
+      .order("received_at", { ascending: false })
+      .order("id")
+      .range(from, to)
+      .returns<SessionHeartbeatSummaryRow[]>());
 
-  for (const row of heartbeatRows ?? []) {
-    if (!row.session_id || latestHeartbeatBySession.has(row.session_id)) {
-      continue;
+    if (heartbeatError) {
+      return jsonSupabaseError("Failed to load session heartbeat summary.", heartbeatError);
     }
 
-    latestHeartbeatBySession.set(row.session_id, row);
-  }
+    for (const row of heartbeatRows ?? []) {
+      if (!row.session_id || latestHeartbeatBySession.has(row.session_id)) {
+        continue;
+      }
 
-  const { data: unreadMessageRows, error: unreadMessageError } = await supabase
-    .from("session_messages")
-    .select("session_id")
-    .in("session_id", sessionIds)
-    .eq("sender", "sub")
-    .is("read_at", null);
+      latestHeartbeatBySession.set(row.session_id, row);
+    }
 
-  if (unreadMessageError) {
-    return jsonSupabaseError("Failed to load unread message counts.", unreadMessageError);
-  }
+    const { data: unreadMessageRows, error: unreadMessageError } = await readAllPages((from, to) => supabase
+      .from("session_messages")
+      .select("session_id")
+      .in("session_id", ids)
+      .eq("sender", "sub")
+      .is("read_at", null)
+      .order("id")
+      .range(from, to));
 
-  const unreadMessageCountBySession = new Map<string, number>();
+    if (unreadMessageError) {
+      return jsonSupabaseError("Failed to load unread message counts.", unreadMessageError);
+    }
 
-  for (const row of unreadMessageRows ?? []) {
-    const sessionId = (row as { session_id: string }).session_id;
-    unreadMessageCountBySession.set(sessionId, (unreadMessageCountBySession.get(sessionId) ?? 0) + 1);
+    for (const row of unreadMessageRows ?? []) {
+      const sessionId = (row as { session_id: string }).session_id;
+      unreadMessageCountBySession.set(sessionId, (unreadMessageCountBySession.get(sessionId) ?? 0) + 1);
+    }
   }
 
   return jsonOk({

@@ -3,6 +3,7 @@ import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { chunks, readAllPages } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -58,14 +59,16 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const { data, error } = await readAllPages((from, to) => supabase
     .from("session_requests")
     .select(
       "id, device_name, requested_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, full_discretion, gallery_access_enabled, status, created_at, approved_at, sub_id, subs(label)",
     )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
-    .returns<PendingRequestRow[]>();
+    .order("id")
+    .range(from, to)
+    .returns<PendingRequestRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load pending session requests.", error);
@@ -75,19 +78,23 @@ export async function GET(request: Request) {
   const subIds = rows.map((row) => row.sub_id).filter((subId): subId is string => subId !== null);
   const deviceBySubId = new Map<string, RequestDeviceRow>();
 
-  if (subIds.length > 0) {
-    const { data: deviceRows, error: deviceError } = await supabase
+  for (const ids of chunks([...new Set(subIds)])) {
+    const { data: deviceRows, error: deviceError } = await readAllPages((from, to) => supabase
       .from("devices")
       .select("sub_id, device_manufacturer, device_model, android_release, android_sdk_int")
-      .in("sub_id", subIds)
-      .returns<RequestDeviceRow[]>();
+      .in("sub_id", ids)
+      .order("last_seen_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .order("id")
+      .range(from, to)
+      .returns<RequestDeviceRow[]>());
 
     if (deviceError) {
       return jsonSupabaseError("Failed to load device info for session requests.", deviceError);
     }
 
     for (const row of deviceRows ?? []) {
-      if (row.sub_id) {
+      if (row.sub_id && !deviceBySubId.has(row.sub_id)) {
         deviceBySubId.set(row.sub_id, row);
       }
     }

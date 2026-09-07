@@ -12,6 +12,24 @@ async function errorBody(response: Response) {
   return (await response.json()) as { error: string };
 }
 
+describe("admin session optimistic concurrency", () => {
+  it("keeps optional revision preconditions without breaking old clients", () => {
+    expect(validateAdminSessionUpdateInput({ dailyLimitMinutes: 30 }).ok).toBe(true);
+    const result = validateAdminSessionUpdateInput({ dailyLimitMinutes: 30, expectedConfigVersion: 2, expectedUpdatedAt: "2026-09-07T12:00:00Z" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.expectedConfigVersion).toBe(2);
+      expect(result.data.expectedUpdatedAt).toBe("2026-09-07T12:00:00Z");
+    }
+  });
+  it("rejects malformed revision preconditions", () => {
+    for (const value of [0, -1, 1.5, "2", null]) {
+      expect(validateAdminSessionUpdateInput({ dailyLimitMinutes: 30, expectedConfigVersion: value }).ok).toBe(false);
+    }
+    expect(validateAdminSessionUpdateInput({ dailyLimitMinutes: 30, expectedUpdatedAt: "invalid" }).ok).toBe(false);
+  });
+});
+
 describe("validateSessionRequestInput", () => {
   const valid = {
     dailyLimitMinutes: 30,

@@ -873,3 +873,31 @@ begin
     alter publication supabase_realtime add table public.sessions;
   end if;
 end $$;
+
+-- Reliability fixes (2026-09-07): reduce history in SQL, before the PostgREST row cap.
+create index if not exists device_heartbeats_latest_status_idx
+  on public.device_heartbeats ((coalesce(device_id, session_id, id)), received_at desc, id desc);
+create or replace view public.latest_device_heartbeats
+with (security_invoker = true) as
+select distinct on (coalesce(device_id, session_id, id))
+  coalesce(device_id, session_id, id) as status_key, h.*
+from public.device_heartbeats h
+order by coalesce(device_id, session_id, id), received_at desc, id desc;
+revoke all on public.latest_device_heartbeats from public, anon, authenticated;
+grant select on public.latest_device_heartbeats to service_role;
+alter table public.devices
+  add column if not exists pending_protection_alert jsonb,
+  add column if not exists last_protection_alert_attempt_at timestamptz;
+
+-- Desktop audit (2026-09-07): preserve latest status for each historical session too.
+create index if not exists device_heartbeats_latest_session_idx
+  on public.device_heartbeats (session_id, received_at desc, id desc)
+  where session_id is not null;
+create or replace view public.latest_session_heartbeats
+with (security_invoker = true) as
+select distinct on (session_id) h.*
+from public.device_heartbeats h
+where session_id is not null
+order by session_id, received_at desc, id desc;
+revoke all on public.latest_session_heartbeats from public, anon, authenticated;
+grant select on public.latest_session_heartbeats to service_role;
