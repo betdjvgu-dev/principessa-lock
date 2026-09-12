@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const { tables, reads, supabase } = vi.hoisted(() => {
   const tables: Record<string, Record<string, unknown>[]> = {};
   const reads: string[] = [];
-  const supabase = { from(table: string) {
+  const supabase = { rpc: vi.fn(async () => ({ data: 0, error: null })), from(table: string) {
     reads.push(table);
     let from = 0;
     let to = 199;

@@ -3,6 +3,7 @@ import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/l
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { revokeTimedOutPauses } from "@/lib/server/session-pause-timeout";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -58,6 +59,9 @@ export async function POST(request: Request, context: RouteContext) {
     return sessionOwnership.response;
   }
 
+  const timeoutError = await revokeTimedOutPauses(supabase, id);
+  if (timeoutError) return timeoutError;
+
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
     .select("ends_at, paused_at, status")
@@ -90,13 +94,15 @@ export async function POST(request: Request, context: RouteContext) {
     .eq("status", "active")
     .eq("paused_at", session.paused_at)
     .eq("ends_at", session.ends_at)
-    .select("ends_at")
-    .maybeSingle<{ ends_at: string }>();
+    .select("ends_at, status")
+    .maybeSingle<{ ends_at: string; status: string }>();
 
   if (updateError) {
     return jsonSupabaseError("Failed to resume session.", updateError);
   }
 
+  // The database trigger also guards a deadline crossed between our read and write.
+  if (updated?.status === "revoked") return jsonError(409, "Session revoked after 24 hours paused. Sync session status.");
   if (updated) return jsonOk({ ok: true, endsAt: updated.ends_at, pausedAt: null });
   const { data: current, error: currentError } = await supabase.from("sessions")
     .select("ends_at, paused_at, status").eq("id", id)

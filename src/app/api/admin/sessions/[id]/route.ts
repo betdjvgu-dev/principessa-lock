@@ -9,6 +9,7 @@ import {
 import { queueSyncConfigPush } from "@/lib/server/remote-action-dispatch";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { sleepWindowError } from "@/lib/server/sleep-window-validation";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -219,6 +220,17 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const updatePayload = buildSessionUpdatePayload(session, validation.data);
+
+  const input = validation.data;
+  if (input.status !== "revoked" && (input.sleepStartTime !== undefined || input.sleepEndTime !== undefined ||
+      input.weekdayOverrides !== undefined || input.forcedSleepEnabled === true)) {
+    const error = sleepWindowError(
+      input.sleepStartTime ?? session.sleep_start_time,
+      input.sleepEndTime ?? session.sleep_end_time,
+      input.weekdayOverrides ?? session.weekday_overrides ?? {},
+    );
+    if (error) return jsonError(400, error);
+  }
 
   if (Object.keys(updatePayload).length === 0) {
     return jsonOk({

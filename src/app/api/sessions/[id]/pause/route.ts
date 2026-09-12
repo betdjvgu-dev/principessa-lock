@@ -3,6 +3,7 @@ import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/l
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { revokeTimedOutPauses } from "@/lib/server/session-pause-timeout";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -58,6 +59,9 @@ export async function POST(request: Request, context: RouteContext) {
   if (!sessionOwnership.ok) {
     return sessionOwnership.response;
   }
+
+  const timeoutError = await revokeTimedOutPauses(supabase, id);
+  if (timeoutError) return timeoutError;
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")

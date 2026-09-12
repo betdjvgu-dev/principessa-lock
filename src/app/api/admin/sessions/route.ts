@@ -4,6 +4,7 @@ import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { chunks, readAllPages } from "@/lib/server/read-pages";
+import { revokeTimedOutPauses } from "@/lib/server/session-pause-timeout";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -220,6 +221,8 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
+  const timeoutError = await revokeTimedOutPauses(supabase);
+  if (timeoutError) return timeoutError;
   const { data, error } = await readAllPages((from, to) => supabase
     .from("sessions")
     .select(
