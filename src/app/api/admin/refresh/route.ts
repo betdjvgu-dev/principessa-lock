@@ -2,6 +2,7 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
+import { adminAuthFailure } from "@/lib/server/admin-auth-errors";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -42,10 +43,11 @@ export async function POST(request: Request) {
   // Isolated: refreshing establishes a session on the client, which must not leak into the
   // shared service-role client used for data access.
   const supabase = createIsolatedSupabaseClient();
-  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken })
+    .catch((error: unknown) => ({ data: null, error }));
 
-  if (error || !data.session) {
-    return jsonError(401, "Session refresh failed. Please log in again.");
+  if (error || !data?.session) {
+    return adminAuthFailure(error, "Session refresh failed. Please log in again.");
   }
 
   return jsonOk({

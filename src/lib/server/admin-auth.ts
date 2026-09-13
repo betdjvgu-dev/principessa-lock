@@ -2,6 +2,7 @@ import "server-only";
 
 import { jsonError } from "@/lib/server/api-response";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
+import { adminAuthFailure } from "./admin-auth-errors";
 
 function extractBearerToken(authorizationHeader: string | null) {
   if (!authorizationHeader) {
@@ -37,10 +38,11 @@ export async function verifyAdminRequest(
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase.auth.getUser(token);
+  const { data, error } = await supabase.auth.getUser(token)
+    .catch((error: unknown) => ({ data: null, error }));
 
-  if (error || !data.user) {
-    return { error: jsonError(401, "Invalid or expired admin session.") };
+  if (error || !data?.user) {
+    return { error: adminAuthFailure(error, "Invalid or expired admin session.") };
   }
 
   const adminEmail = process.env.ADMIN_EMAIL;
