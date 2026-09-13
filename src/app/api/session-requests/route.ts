@@ -3,7 +3,7 @@ import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { sendNewSessionRequestPush, sendSessionRequestDecisionPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { validateSessionRequestInput, readJsonBody, type SessionRequestInput } from "@/lib/server/request-validation";
-import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
+import { shouldAutoApproveSessionRequest } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 
@@ -29,18 +29,14 @@ type OwnRequestStatusRow = {
 // a value re-typed in the session-request form would let a request claim a different name than
 // what's actually registered, with nothing tying the two together.
 //
-// A request that prices out to $0 (see calculateSessionPriceUsd) has nothing for the keyholder to
-// manually confirm on Throne -- the only reason paid requests sit in "pending" is so she can
-// verify the payment before approving. requireAuthenticatedDevice already refused to let this
-// route run at all unless the requesting sub's status is "active" (genuinely approved, not just
-// "invited"), so a free request can safely skip straight to "approved" here instead of waiting on
-// a manual tap that has nothing left to check.
+// All options are free. Normal requests auto-approve for registered devices;
+// full-discretion requests still wait for the admin to choose their actual terms.
 function buildInsertPayload(
   input: SessionRequestInput,
   deviceId: string,
   deviceName: string,
   subId: string | null,
-  isFree: boolean,
+  autoApprove: boolean,
 ) {
   const base = {
     always_allowed_package: input.alwaysAllowedPackage ?? null,
@@ -55,7 +51,7 @@ function buildInsertPayload(
     sub_id: subId,
   };
 
-  if (!isFree) {
+  if (!autoApprove) {
     return base;
   }
 
@@ -125,18 +121,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const isFree =
-    calculateSessionPriceUsd(
-      validation.data.fullDiscretion,
-      validation.data.galleryAccessEnabled,
-      validation.data.dailyLimitMinutes,
-      validation.data.sessionDays,
-      validation.data.screenTimeEnabled,
-    ) === 0;
+  const autoApprove = shouldAutoApproveSessionRequest(validation.data.fullDiscretion);
 
   const { data, error } = await supabase
     .from("session_requests")
-    .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.deviceName, deviceAuth.device.subId, isFree))
+    .insert(buildInsertPayload(validation.data, deviceAuth.device.id, deviceAuth.device.deviceName, deviceAuth.device.subId, autoApprove))
     .select("id, status")
     .single<CreateSessionRequestRow>();
 
@@ -144,7 +133,7 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Failed to create session request.", error);
   }
 
-  if (isFree) {
+  if (autoApprove) {
     // Nothing for the keyholder to review -- tell the sub's own device it's ready to activate
     // instead of paging the keyholder about a request that's already been decided.
     const { data: device } = await supabase

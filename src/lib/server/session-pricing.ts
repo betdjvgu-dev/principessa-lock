@@ -5,35 +5,22 @@ import "server-only";
 // so the leaderboard has a trustworthy total instead of trusting a client-computed one, and to
 // decide at session-requests creation time whether a request is free enough to auto-approve.
 export const GALLERY_ACCESS_PRICE_USD = 0;
-export const FULL_DISCRETION_FEE_USD = 10;
+export const FULL_DISCRETION_FEE_USD = 0;
 
-// The daily limit is free across its entire 5-90 minute range -- full_discretion is the only
-// paid option left. Kept as a function (rather than inlining 0) so callers don't need to know
-// that, and so a future tiered fee only has to change here.
+// All session options are free; only app unlocks remain paid.
 export function calculateDailyLimitFeeUsd(dailyLimitMinutes: number): number {
   return 0;
 }
 
-export const SCREEN_TIME_FEE_PER_DAY_USD = 1;
-export const SCREEN_TIME_MIN_FEE_USD = 5;
+export const SCREEN_TIME_FEE_PER_DAY_USD = 0;
+export const SCREEN_TIME_MIN_FEE_USD = 0;
 
-// Paying to go *without* a daily screen-time limit -- the limit itself stays free (it always has
-// been, across its whole 5-90 minute range), but choosing unrestricted screen time for the session
-// costs money, scaling with session length ($1/day) with a $5 floor so a short session doesn't
-// trivially undercut it. Free when screenTimeEnabled is on, since the limit is still doing its job.
+// Unrestricted screen time is free regardless of session length.
 export function calculateScreenTimeFeeUsd(sessionDays: number, screenTimeEnabled: boolean): number {
-  if (screenTimeEnabled) {
-    return 0;
-  }
-  return Math.max(SCREEN_TIME_MIN_FEE_USD, sessionDays * SCREEN_TIME_FEE_PER_DAY_USD);
+  return 0;
 }
 
-// full_discretion is a flat fee regardless of the terms the keyholder ends up setting -- the
-// tiered daily-limit fee and the screen-time fee only apply to a sub's own chosen terms on a
-// normal request, not to whatever the keyholder later decides for a "leave it up to Principessa"
-// one (the sub's own submitted sessionDays/dailyLimitMinutes/screenTimeEnabled are just
-// placeholders in that mode -- charging based on them would charge for a choice the sub never
-// actually made).
+// Keep the call signature stable for activation and older request flows.
 export function calculateSessionPriceUsd(
   fullDiscretion: boolean,
   galleryAccessEnabled: boolean = false,
@@ -41,11 +28,12 @@ export function calculateSessionPriceUsd(
   sessionDays: number = 1,
   screenTimeEnabled: boolean = true,
 ): number {
-  const discretionFee = fullDiscretion ? FULL_DISCRETION_FEE_USD : 0;
-  const galleryFee = galleryAccessEnabled ? GALLERY_ACCESS_PRICE_USD : 0;
-  const dailyLimitFee = fullDiscretion ? 0 : calculateDailyLimitFeeUsd(dailyLimitMinutes);
-  const screenTimeFee = fullDiscretion ? 0 : calculateScreenTimeFeeUsd(sessionDays, screenTimeEnabled);
-  return discretionFee + galleryFee + dailyLimitFee + screenTimeFee;
+  return 0;
+}
+
+// The admin still needs to choose terms for free full-discretion requests.
+export function shouldAutoApproveSessionRequest(fullDiscretion: boolean): boolean {
+  return !fullDiscretion;
 }
 
 // Blocked-app unlock price scales with how much of the session is actually left to unlock for --

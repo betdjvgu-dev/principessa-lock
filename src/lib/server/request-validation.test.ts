@@ -82,7 +82,7 @@ describe("validateSessionRequestInput", () => {
   });
 
   it("rejects dailyLimitMinutes out of range", async () => {
-    const result = validateSessionRequestInput({ ...valid, dailyLimitMinutes: 91 });
+    const result = validateSessionRequestInput({ ...valid, dailyLimitMinutes: 151 });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect((await errorBody(result.response)).error).toMatch(/dailyLimitMinutes/);
@@ -92,6 +92,17 @@ describe("validateSessionRequestInput", () => {
   it("rejects a non-object payload", () => {
     expect(validateSessionRequestInput("nope").ok).toBe(false);
     expect(validateSessionRequestInput(null).ok).toBe(false);
+  });
+
+  it("accepts the expanded 5-150 range without accepting invalid values", () => {
+    for (const dailyLimitMinutes of [5, 90, 91, 149, 150]) {
+      expect(validateSessionRequestInput({ ...valid, dailyLimitMinutes }).ok).toBe(true);
+    }
+    for (const dailyLimitMinutes of [4, 151, 149.5, "150", null]) {
+      expect(validateSessionRequestInput({ ...valid, dailyLimitMinutes }).ok).toBe(false);
+    }
+    expect(validateSessionRequestInput({ ...valid, fullDiscretion: true, dailyLimitMinutes: 150 }).ok).toBe(true);
+    expect(validateSessionRequestInput({ ...valid, fullDiscretion: true, dailyLimitMinutes: 151 }).ok).toBe(false);
   });
 });
 

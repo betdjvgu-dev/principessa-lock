@@ -293,10 +293,10 @@ export function validateSessionRequestInput(input: unknown) {
       return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30.") };
     }
 
-    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+    if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 150)) {
       return {
         ok: false as const,
-        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90."),
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 150."),
       };
     }
 
@@ -308,10 +308,10 @@ export function validateSessionRequestInput(input: unknown) {
       return { ok: false as const, response: jsonError(400, "sessionDays must be an integer between 1 and 30 when provided.") };
     }
 
-    if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 90)) {
+    if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 150)) {
       return {
         ok: false as const,
-        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 90 when provided."),
+        response: jsonError(400, "dailyLimitMinutes must be an integer between 5 and 150 when provided."),
       };
     }
 
@@ -376,7 +376,7 @@ export function validateApproveSessionRequestInput(input: unknown) {
   }
 
   if (payload.dailyLimitMinutes !== undefined) {
-    // Unlike validateSessionRequestInput (the sub-facing request form, still capped at 5-90),
+    // Unlike validateSessionRequestInput (the sub-facing request form, capped at 5-150),
     // this is the keyholder setting real terms at approval time -- what matters is who's making
     // the request, not a blanket cap, so this only enforces a sanity ceiling (24h).
     if (!isIntegerInRange(payload.dailyLimitMinutes, 5, 1440)) {
@@ -1095,7 +1095,7 @@ export function validateAdminSessionUpdateInput(input: unknown) {
   }
 
   // Admin-facing (desktop "Save Config") -- only a sanity ceiling (24h), not the sub-facing
-  // request form's 5-90 cap. What matters is who's making the request, not a blanket limit.
+  // request form's 5-150 cap. What matters is who's making the request, not a blanket limit.
   if (payload.dailyLimitMinutes !== undefined && !isIntegerInRange(payload.dailyLimitMinutes, 5, 1440)) {
     return {
       ok: false as const,

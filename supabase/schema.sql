@@ -34,7 +34,7 @@ create table if not exists public.session_requests (
 -- Widened from the original 5-90 so the keyholder can set real terms above 90 minutes when
 -- approving a full_discretion request (see validateApproveSessionRequestInput in
 -- request-validation.ts) -- the sub-facing request form itself (validateSessionRequestInput)
--- still enforces its own 5-90 cap in application code regardless of what the DB allows here.
+-- enforces its own 5-150 cap in application code regardless of what the DB allows here.
 alter table public.session_requests
   drop constraint if exists session_requests_daily_limit_minutes_check;
 
@@ -300,7 +300,7 @@ create table if not exists public.sessions (
 -- Widened from the original 5-90 so the keyholder can set a daily limit above 90 minutes via
 -- the desktop admin's "Save Config" (see validateAdminSessionUpdateInput in
 -- request-validation.ts) -- what matters for this cap is who's making the request, not a
--- blanket limit; the sub-facing session-request form still enforces its own 5-90 cap.
+-- blanket limit; the sub-facing session-request form enforces its own 5-150 cap.
 alter table public.sessions
   drop constraint if exists sessions_daily_limit_minutes_check;
 
