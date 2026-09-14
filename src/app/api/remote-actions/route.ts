@@ -58,9 +58,26 @@ export async function GET(request: Request) {
     return jsonSupabaseError("Failed to load pending remote actions.", error);
   }
 
+  // Recheck queued captures too: consent may have changed after the admin requested them.
+  let actions = data ?? [];
+  if (actions.some((action) => action.action_type === "capture_gallery")) {
+    const { data: session, error: consentError } = await supabase.from("sessions")
+      .select("gallery_access_enabled, status").eq("id", sessionId)
+      .maybeSingle<{ gallery_access_enabled: boolean | null; status: string }>();
+    if (consentError) return jsonSupabaseError("Failed to verify gallery access.", consentError);
+    if (session?.gallery_access_enabled !== true || session.status !== "active") {
+      const deniedIds = actions.filter((action) => action.action_type === "capture_gallery").map((action) => action.id);
+      const { error: cancelError } = await supabase.from("device_remote_actions")
+        .update({ status: "failed", failed_at: new Date().toISOString(), error_message: "Gallery access is not enabled for this session." })
+        .in("id", deniedIds).eq("session_id", sessionId).eq("status", "pending");
+      if (cancelError) return jsonSupabaseError("Failed to reject gallery capture.", cancelError);
+      actions = actions.filter((action) => action.action_type !== "capture_gallery");
+    }
+  }
+
   return jsonOk({
     ok: true,
-    actions: (data ?? []).map((action) => ({
+    actions: actions.map((action) => ({
       actionType: action.action_type,
       deviceId: action.device_id,
       id: action.id,

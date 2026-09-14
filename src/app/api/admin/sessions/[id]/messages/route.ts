@@ -50,7 +50,8 @@ export async function GET(request: Request, context: RouteContext) {
     .from("session_messages")
     .select("id, sender, body, created_at")
     .eq("session_id", id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(100)
     .returns<MessageRow[]>();
 
@@ -58,16 +59,19 @@ export async function GET(request: Request, context: RouteContext) {
     return jsonSupabaseError("Failed to load messages.", error);
   }
 
-  await supabase
-    .from("session_messages")
-    .update({ read_at: new Date().toISOString() })
-    .eq("session_id", id)
-    .eq("sender", "sub")
-    .is("read_at", null);
+  if (data?.length) {
+    await supabase
+      .from("session_messages")
+      .update({ read_at: new Date().toISOString() })
+      .eq("session_id", id)
+      .in("id", data.map((row) => row.id))
+      .eq("sender", "sub")
+      .is("read_at", null);
+  }
 
   return jsonOk({
     ok: true,
-    messages: (data ?? []).map((row) => ({
+    messages: (data ?? []).slice().reverse().map((row) => ({
       id: row.id,
       sender: row.sender,
       body: row.body,

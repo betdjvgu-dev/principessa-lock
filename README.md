@@ -18,7 +18,7 @@ Copy `.env.example` to `.env.local` and fill in:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_ANON_KEY`
-- `ADMIN_EMAIL` (optional)
+- `ADMIN_EMAIL` (required; admin login, refresh and protected admin routes deny access when missing)
 - `GITHUB_RELEASE_REPOSITORY` (public APK-only repository)
 - `GITHUB_RELEASE_TOKEN` (fine-grained token scoped to that repository)
 

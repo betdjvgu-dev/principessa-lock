@@ -3,6 +3,7 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
 import { adminAuthFailure } from "@/lib/server/admin-auth-errors";
+import { authorizeAdminEmail, requireAdminConfiguration } from "@/lib/server/admin-identity";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -16,6 +17,9 @@ type AdminRefreshInput = {
 };
 
 export async function POST(request: Request) {
+  const configurationError = requireAdminConfiguration();
+  if (configurationError) return configurationError;
+
   const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many refresh attempts. Please wait before trying again.",
     limit: 30,
@@ -49,6 +53,9 @@ export async function POST(request: Request) {
   if (error || !data?.session) {
     return adminAuthFailure(error, "Session refresh failed. Please log in again.");
   }
+
+  const identityError = authorizeAdminEmail(data.session.user?.email);
+  if (identityError) return identityError;
 
   return jsonOk({
     ok: true,

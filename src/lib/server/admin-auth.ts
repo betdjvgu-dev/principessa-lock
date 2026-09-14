@@ -3,6 +3,7 @@ import "server-only";
 import { jsonError } from "@/lib/server/api-response";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { adminAuthFailure } from "./admin-auth-errors";
+import { authorizeAdminEmail, requireAdminConfiguration } from "./admin-identity";
 
 function extractBearerToken(authorizationHeader: string | null) {
   if (!authorizationHeader) {
@@ -25,8 +26,7 @@ export type AdminIdentity = {
 
 /**
  * Verifies the keyholder's Supabase Auth session token. There is exactly one
- * admin identity for this product, so `ADMIN_EMAIL` (optional) is a cheap
- * belt-and-suspenders check rather than a real multi-tenant authorization rule.
+ * admin identity for this product. Missing ADMIN_EMAIL always denies access.
  */
 export async function verifyAdminRequest(
   request: Request,
@@ -37,6 +37,9 @@ export async function verifyAdminRequest(
     return { error: jsonError(401, "Missing or invalid admin bearer token.") };
   }
 
+  const configurationError = requireAdminConfiguration();
+  if (configurationError) return { error: configurationError };
+
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase.auth.getUser(token)
     .catch((error: unknown) => ({ data: null, error }));
@@ -45,11 +48,8 @@ export async function verifyAdminRequest(
     return { error: adminAuthFailure(error, "Invalid or expired admin session.") };
   }
 
-  const adminEmail = process.env.ADMIN_EMAIL;
-
-  if (adminEmail && data.user.email?.toLowerCase() !== adminEmail.toLowerCase()) {
-    return { error: jsonError(403, "This account is not authorized as the admin.") };
-  }
+  const identityError = authorizeAdminEmail(data.user.email);
+  if (identityError) return { error: identityError };
 
   return { identity: { id: data.user.id, email: data.user.email ?? null } };
 }

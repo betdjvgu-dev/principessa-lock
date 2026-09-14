@@ -1,7 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-const { tables, reads, supabase } = vi.hoisted(() => {
+const { tables, reads, supabase, failures } = vi.hoisted(() => {
   const tables: Record<string, Record<string, unknown>[]> = {};
+  const failures: Record<string, { code: string; message: string }[]> = {};
   const reads: string[] = [];
   const supabase = { rpc: vi.fn(async () => ({ data: 0, error: null })), from(table: string) {
     reads.push(table);
@@ -14,14 +15,16 @@ const { tables, reads, supabase } = vi.hoisted(() => {
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return query; },
       is(key: string, value: unknown) { return query.eq(key, value); },
       in(key: string, values: unknown[]) { filters.push((row) => values.includes(row[key])); return query; },
-      then(resolve: (result: { data: Record<string, unknown>[]; error: null }) => unknown) {
+      then(resolve: (result: { data: Record<string, unknown>[] | null; error: { code: string; message: string } | null }) => unknown) {
+        const error = failures[table]?.shift();
+        if (error) return Promise.resolve(resolve({ data: null, error }));
         // Simulate a PostgREST row cap smaller than the requested page size.
         return Promise.resolve(resolve({ data: (tables[table] ?? []).filter((row) => filters.every((filter) => filter(row))).slice(from, Math.min(to + 1, from + 20)), error: null }));
       },
     };
     return query;
   } };
-  return { tables, reads, supabase };
+  return { tables, reads, supabase, failures };
 });
 vi.mock("@/lib/server/rate-limit", () => ({ enforceAdminRateLimit: async () => null }));
 vi.mock("@/lib/server/admin-auth", () => ({ verifyAdminRequest: async () => ({ error: null }) }));
@@ -33,7 +36,37 @@ import { GET as unlocks } from "@/app/api/admin/unlock-requests/route";
 
 beforeEach(() => {
   for (const key of Object.keys(tables)) delete tables[key];
+  for (const key of Object.keys(failures)) delete failures[key];
   reads.length = 0;
+});
+
+it("recovers subs device details after a temporary database read failure", async () => {
+  tables.subs = [{ id: "u1", label: "Test" }];
+  tables.devices = [{ sub_id: "u1", device_model: "Phone" }];
+  failures.devices = [{ code: "", message: "TypeError: fetch failed" }];
+  const response = await subs(new Request("http://localhost/api/admin/subs"));
+  expect(response.status).toBe(200);
+  expect((await response.json()).subs[0].device_model).toBe("Phone");
+});
+
+it("returns retryable 503 for exhausted transient device reads, without a false success", async () => {
+  tables.subs = [{ id: "u1" }];
+  failures.devices = Array.from({ length: 3 }, () => ({ code: "PGRST003", message: "Pool unavailable" }));
+  const response = await subs(new Request("http://localhost/api/admin/subs"));
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.ok).toBe(false);
+  expect(body.subs).toBeUndefined();
+  expect(body.error).toBe("Failed to load device info for subs.");
+});
+
+it("keeps permanent device schema errors visible rather than returning Unknown devices", async () => {
+  tables.subs = [{ id: "u1" }];
+  failures.devices = [{ code: "42703", message: "Private database details" }];
+  const response = await subs(new Request("http://localhost/api/admin/subs"));
+  expect(response.status).toBe(500);
+  expect(reads.filter((table) => table === "devices")).toHaveLength(1);
+  expect(await response.text()).not.toContain("Private database details");
 });
 
 it("lists sessions beyond the old 50 cap with latest heartbeat and complete unread counts", async () => {

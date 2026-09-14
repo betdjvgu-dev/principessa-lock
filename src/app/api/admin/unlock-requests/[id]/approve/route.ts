@@ -57,9 +57,9 @@ export async function POST(request: Request, context: RouteContext) {
   // needs the session's actual end time here rather than a duration constant.
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("ends_at, status")
+    .select("ends_at, status, device_id, sub_id")
     .eq("id", pendingRequest.session_id)
-    .maybeSingle<{ ends_at: string; status: string }>();
+    .maybeSingle<{ ends_at: string; status: string; device_id: string; sub_id: string | null }>();
 
   if (sessionError) {
     return jsonSupabaseError("Failed to load the session for this unlock request.", sessionError);
@@ -103,14 +103,15 @@ export async function POST(request: Request, context: RouteContext) {
   // Awaited (not fire-and-forget) since a serverless function isn't guaranteed to keep running
   // background work after it returns a response. Without this, an approved unlock only reached
   // the device on its own next periodic sync tick instead of immediately.
-  await queueSyncConfigPush(supabase, {
-    deviceId: updated.device_id,
+  const delivery = await queueSyncConfigPush(supabase, {
+    deviceId: session.device_id,
     sessionId: updated.session_id,
-    subId: updated.sub_id,
+    subId: session.sub_id,
   });
 
   return jsonOk({
     ok: true,
+    delivery,
     request: {
       expiresAt: updated.expires_at,
       id: updated.id,

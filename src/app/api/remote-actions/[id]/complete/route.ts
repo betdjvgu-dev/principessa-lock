@@ -20,6 +20,8 @@ type RouteContext = {
 type RemoteActionStatusRow = {
   id: string;
   status: string;
+  action_type: string;
+  session_id: string;
 };
 
 export async function POST(request: Request, context: RouteContext) {
@@ -60,7 +62,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { data: action, error: loadError } = await supabase
     .from("device_remote_actions")
-    .select("id, status")
+    .select("id, status, action_type, session_id")
     .eq("id", id)
     .maybeSingle<RemoteActionStatusRow>();
 
@@ -76,8 +78,17 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonError(409, "Remote action is no longer pending.");
   }
 
+  let galleryConsentDenied = false;
+  if (action.action_type === "capture_gallery") {
+    const { data: session, error: consentError } = await supabase.from("sessions")
+      .select("gallery_access_enabled, status").eq("id", action.session_id)
+      .maybeSingle<{ gallery_access_enabled: boolean | null; status: string }>();
+    if (consentError) return jsonSupabaseError("Failed to verify gallery access.", consentError);
+    galleryConsentDenied = session?.gallery_access_enabled !== true || session.status !== "active";
+  }
+
   const now = new Date().toISOString();
-  const updatePayload = validation.data.ok
+  const updatePayload = validation.data.ok && !galleryConsentDenied
     ? {
         completed_at: now,
         error_message: null,
@@ -87,9 +98,9 @@ export async function POST(request: Request, context: RouteContext) {
       }
     : {
         completed_at: null,
-        error_message: validation.data.errorMessage ?? "Remote action failed on device.",
+        error_message: galleryConsentDenied ? "Gallery access is not enabled for this session." : validation.data.errorMessage ?? "Remote action failed on device.",
         failed_at: now,
-        result_payload: validation.data.result ?? {},
+        result_payload: galleryConsentDenied ? {} : validation.data.result ?? {},
         status: "failed",
       };
 

@@ -3,6 +3,7 @@ import { getServerEnv, getSupabaseAnonKey } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
+import { authorizeAdminEmail, requireAdminConfiguration } from "@/lib/server/admin-identity";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -17,6 +18,9 @@ type AdminLoginInput = {
 };
 
 export async function POST(request: Request) {
+  const configurationError = requireAdminConfiguration();
+  if (configurationError) return configurationError;
+
   const rateLimitError = await enforceRateLimit({
     errorMessage: "Too many login attempts. Please wait before trying again.",
     limit: 10,
@@ -51,11 +55,8 @@ export async function POST(request: Request) {
     return jsonError(401, "Invalid email or password.");
   }
 
-  const adminEmail = process.env.ADMIN_EMAIL;
-
-  if (adminEmail && data.session.user.email?.toLowerCase() !== adminEmail.toLowerCase()) {
-    return jsonError(403, "This account is not authorized as the admin.");
-  }
+  const identityError = authorizeAdminEmail(data.session.user?.email);
+  if (identityError) return identityError;
 
   // The anon key is safe to hand back here (unlike the service-role key) -- it's meaningless
   // without a valid Supabase Auth JWT, and Row Level Security on the realtime-eligible tables

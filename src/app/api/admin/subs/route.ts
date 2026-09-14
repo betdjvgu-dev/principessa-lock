@@ -4,6 +4,7 @@ import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { chunks, readAllPages } from "@/lib/server/read-pages";
+import { isTransientReadError } from "@/lib/server/transient-read-error";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
     .returns<SubRow[]>());
 
   if (error) {
-    return jsonSupabaseError("Failed to load subs.", error);
+    return jsonSupabaseError("Failed to load subs.", error, isTransientReadError(error) ? 503 : 500);
   }
 
   const subs = data ?? [];
@@ -82,7 +83,12 @@ export async function GET(request: Request) {
       .returns<SubDeviceRow[]>());
 
     if (deviceError) {
-      return jsonSupabaseError("Failed to load device info for subs.", deviceError);
+      // Let existing desktop GET retries recover a short outage; never return an
+      // empty/Unknown device snapshot that overwrites previously loaded details.
+      return jsonSupabaseError(
+        "Failed to load device info for subs.", deviceError,
+        isTransientReadError(deviceError) ? 503 : 500,
+      );
     }
 
     for (const row of deviceRows ?? []) {

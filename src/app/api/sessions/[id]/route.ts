@@ -1,7 +1,8 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/lib/server/device-auth";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
-import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { jsonSupabaseReadError } from "@/lib/server/supabase-errors";
+import { retrySupabaseRead } from "@/lib/server/retry-supabase-read";
 import { revokeTimedOutPauses } from "@/lib/server/session-pause-timeout";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
@@ -72,14 +73,14 @@ export async function GET(request: Request, context: RouteContext) {
   const timeoutError = await revokeTimedOutPauses(supabase, id);
   if (timeoutError) return timeoutError;
 
-  const { data: session, error } = await supabase
+  const { data: session, error } = await retrySupabaseRead(() => supabase
     .from("sessions")
     .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at")
     .eq("id", id)
-    .maybeSingle<SessionRow>();
+    .maybeSingle<SessionRow>());
 
   if (error) {
-    return jsonSupabaseError("Failed to load session.", error);
+    return jsonSupabaseReadError("Failed to load session.", error);
   }
 
   if (!session) {
@@ -87,13 +88,17 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const nowIso = new Date().toISOString();
-  const { data: unlocks } = await supabase
+  const { data: unlocks, error: unlockError } = await retrySupabaseRead(() => supabase
     .from("app_unlock_requests")
     .select("package_name")
     .eq("session_id", id)
     .eq("status", "approved")
     .gt("expires_at", nowIso)
-    .returns<{ package_name: string }[]>();
+    .returns<{ package_name: string }[]>());
+
+  if (unlockError) {
+    return jsonSupabaseReadError("Failed to load session app unlocks.", unlockError);
+  }
 
   return jsonOk({
     ok: true,

@@ -2,7 +2,7 @@ import { jsonOk } from "@/lib/server/api-response";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
-import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { jsonSupabaseReadError } from "@/lib/server/supabase-errors";
 import { chunks, readAllPages } from "@/lib/server/read-pages";
 import { revokeTimedOutPauses } from "@/lib/server/session-pause-timeout";
 
@@ -234,7 +234,7 @@ export async function GET(request: Request) {
     .returns<RawSessionRow[]>());
 
   if (error) {
-    return jsonSupabaseError("Failed to load sessions.", error);
+    return jsonSupabaseReadError("Failed to load sessions.", error);
   }
 
   // Diagnostic: this route intermittently answers 200 with an empty list while rows exist in the
@@ -305,7 +305,7 @@ export async function GET(request: Request) {
       .returns<SessionHeartbeatSummaryRow[]>());
 
     if (heartbeatError) {
-      return jsonSupabaseError("Failed to load session heartbeat summary.", heartbeatError);
+      return jsonSupabaseReadError("Failed to load session heartbeat summary.", heartbeatError);
     }
 
     for (const row of heartbeatRows ?? []) {
@@ -326,7 +326,7 @@ export async function GET(request: Request) {
       .range(from, to));
 
     if (unreadMessageError) {
-      return jsonSupabaseError("Failed to load unread message counts.", unreadMessageError);
+      return jsonSupabaseReadError("Failed to load unread message counts.", unreadMessageError);
     }
 
     for (const row of unreadMessageRows ?? []) {

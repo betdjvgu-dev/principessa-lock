@@ -59,7 +59,7 @@ async function sendDataPush(fcmToken: string | null | undefined, data: Record<st
 
 /** Wakes a device to check for pending remote actions immediately (e.g. force_lock). */
 export async function sendRemoteActionPush(fcmToken: string | null | undefined) {
-  await sendDataPush(fcmToken, { type: "remote_action" });
+  return sendDataPush(fcmToken, { type: "remote_action" });
 }
 
 /** Wakes a device to check for (and notify) a new message from Principessa immediately --

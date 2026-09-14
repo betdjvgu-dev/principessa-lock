@@ -4,7 +4,8 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { jsonError } from "@/lib/server/api-response";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
-import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { jsonSupabaseReadError } from "@/lib/server/supabase-errors";
+import { retrySupabaseRead } from "./retry-supabase-read";
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 
@@ -86,16 +87,16 @@ export async function requireAuthenticatedDevice(
   }
 
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
-  const { data: device, error } = await supabase
+  const { data: device, error } = await retrySupabaseRead(() => supabase
     .from("devices")
     .select("id, device_name, device_secret_hash, sub_id, subs(status)")
     .eq("device_secret_hash", hashDeviceSecret(deviceSecret))
-    .maybeSingle<DeviceAuthRow>();
+    .maybeSingle<DeviceAuthRow>());
 
   if (error) {
     return {
       ok: false,
-      response: jsonSupabaseError("Failed to verify device authorization.", error),
+      response: jsonSupabaseReadError("Failed to verify device authorization.", error),
     };
   }
 
@@ -156,16 +157,16 @@ export async function verifySessionOwnershipForDevice({
   }
 
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
-  const { data: session, error } = await supabase
+  const { data: session, error } = await retrySupabaseRead(() => supabase
     .from("sessions")
     .select("id, device_id")
     .eq("id", sessionId)
-    .maybeSingle<SessionOwnershipRow>();
+    .maybeSingle<SessionOwnershipRow>());
 
   if (error) {
     return {
       ok: false,
-      response: jsonSupabaseError("Failed to verify session ownership.", error),
+      response: jsonSupabaseReadError("Failed to verify session ownership.", error),
     };
   }
 
@@ -214,7 +215,7 @@ export async function verifyRemoteActionOwnershipForDevice({
   if (error) {
     return {
       ok: false,
-      response: jsonSupabaseError("Failed to verify remote action ownership.", error),
+      response: jsonSupabaseReadError("Failed to verify remote action ownership.", error),
     };
   }
 

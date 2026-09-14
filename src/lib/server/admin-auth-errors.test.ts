@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { auth } = vi.hoisted(() => ({ auth: { getUser: vi.fn(), refreshSession: vi.fn() } }));
 vi.mock("./supabase-admin", () => ({
   getSupabaseAdminClient: () => ({ auth }), createIsolatedSupabaseClient: () => ({ auth }),
@@ -11,7 +11,8 @@ import { POST as refresh } from "../../app/api/admin/refresh/route";
 const refreshRequest = () => new Request("http://localhost/api/admin/refresh", {
   method: "POST", body: JSON.stringify({ refreshToken: "test-token" }),
 });
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => { vi.resetAllMocks(); vi.stubEnv("ADMIN_EMAIL", "admin@example.test"); });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("admin authentication failure classification", () => {
   it.each([undefined, new TypeError("fetch failed"), { status: 500 }, { status: 503 },
@@ -52,7 +53,7 @@ describe("admin routes preserve the distinction", () => {
     expect((await refresh(refreshRequest())).status).toBe(503);
   });
   it("still returns rotated credentials on success", async () => {
-    auth.refreshSession.mockResolvedValue({ data: { session: { access_token: "new-access", refresh_token: "new-refresh" } }, error: null });
+    auth.refreshSession.mockResolvedValue({ data: { session: { user: { email: "admin@example.test" }, access_token: "new-access", refresh_token: "new-refresh" } }, error: null });
     const response = await refresh(refreshRequest());
     expect(response.status).toBe(200);
     expect((await response.json()).session.refreshToken).toBe("new-refresh");
