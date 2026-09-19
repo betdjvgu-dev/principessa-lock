@@ -408,7 +408,7 @@ create table if not exists public.session_daily_usage (
   constraint session_daily_usage_used_minutes_check
     check (used_minutes >= 0),
   constraint session_daily_usage_limit_minutes_check
-    check (limit_minutes between 5 and 90),
+    check (limit_minutes >= 5),
   constraint session_daily_usage_session_id_local_date_key
     unique (session_id, local_date)
 );

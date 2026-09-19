@@ -233,7 +233,7 @@ export async function POST(request: Request) {
   // (older app builds, a heartbeat sent before the session engine has a local date yet)
   // just skips this day's row rather than failing the whole heartbeat.
   if (heartbeat.localDate && heartbeat.usedMinutes !== undefined && heartbeat.dailyLimitMinutes !== undefined) {
-    await supabase.from("session_daily_usage").upsert(
+    const { error: usageError } = await supabase.from("session_daily_usage").upsert(
       {
         limit_minutes: heartbeat.dailyLimitMinutes,
         local_date: heartbeat.localDate,
@@ -245,6 +245,12 @@ export async function POST(request: Request) {
       },
       { onConflict: "session_id,local_date" },
     );
+    if (usageError) {
+      // The health report is already stored; expose the secondary failure without
+      // pretending history saved or disrupting local protection with a failed heartbeat.
+      console.error("Usage history could not be stored.", { code: usageError.code, message: usageError.message });
+      return jsonOk({ ok: true, usageHistorySaved: false });
+    }
   }
 
   return jsonOk({ ok: true });
