@@ -1,9 +1,7 @@
 import "server-only";
 
-import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
-
 import { jsonRateLimited } from "@/lib/server/api-response";
+import { recordRequestMetric } from "./request-metrics";
 
 type RateLimitBucket = {
   count: number;
@@ -19,7 +17,7 @@ type RateLimitOptions = {
 };
 
 const RATE_LIMIT_STORE_KEY = "__principessa_lock_rate_limit_store__";
-const RATE_LIMITER_CACHE_KEY = "__principessa_lock_rate_limiter_cache__";
+const MAX_BUCKETS = 10_000;
 
 function getRateLimitStore() {
   const globalState = globalThis as typeof globalThis & {
@@ -66,82 +64,18 @@ function pruneExpiredBuckets(store: Map<string, RateLimitBucket>, now: number) {
       store.delete(key);
     }
   }
-}
 
-let cachedRedis: Redis | null | undefined;
-
-function isProductionEnvironment() {
-  return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
-}
-
-function getUpstashRedis(): Redis | null {
-  if (cachedRedis !== undefined) {
-    return cachedRedis;
+  if (store.size <= MAX_BUCKETS) {
+    return;
   }
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (!url || !token) {
-    if (isProductionEnvironment()) {
-      // The in-memory fallback below is per-serverless-instance only, so on a real
-      // multi-instance production deployment it doesn't actually rate-limit anything across
-      // instances -- fail loudly here rather than silently running with no effective
-      // protection. Local/dev (no VERCEL_ENV, NODE_ENV !== "production") still falls back.
-      throw new Error(
-        "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set in production -- the in-memory rate limit fallback does not work across multiple serverless instances.",
-      );
+  const oldestFirst = [...store.entries()].sort((left, right) => left[1].resetAt - right[1].resetAt);
+  for (const [key] of oldestFirst) {
+    if (store.size <= MAX_BUCKETS) {
+      break;
     }
-
-    cachedRedis = null;
-    return cachedRedis;
+    store.delete(key);
   }
-
-  cachedRedis = new Redis({ token, url });
-  return cachedRedis;
-}
-
-function getRateLimiterCache() {
-  const globalState = globalThis as typeof globalThis & {
-    [RATE_LIMITER_CACHE_KEY]?: Map<string, Ratelimit>;
-  };
-
-  if (!globalState[RATE_LIMITER_CACHE_KEY]) {
-    globalState[RATE_LIMITER_CACHE_KEY] = new Map<string, Ratelimit>();
-  }
-
-  return globalState[RATE_LIMITER_CACHE_KEY];
-}
-
-/**
- * Returns an Upstash-backed limiter (shared across serverless instances/regions) when
- * `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` are configured, otherwise `null` so
- * callers fall back to the in-memory, per-instance-only limiter (fine for local dev, but
- * throws instead in a production environment -- see getUpstashRedis).
- */
-function getUpstashLimiter(limit: number, windowMs: number): Ratelimit | null {
-  const redis = getUpstashRedis();
-
-  if (!redis) {
-    return null;
-  }
-
-  const cacheKey = `${limit}:${windowMs}`;
-  const cache = getRateLimiterCache();
-  const cached = cache.get(cacheKey);
-
-  if (cached) {
-    return cached;
-  }
-
-  const limiter = new Ratelimit({
-    limiter: Ratelimit.slidingWindow(limit, `${windowMs} ms`),
-    prefix: "principessa_lock_rate_limit",
-    redis,
-  });
-
-  cache.set(cacheKey, limiter);
-  return limiter;
 }
 
 /**
@@ -149,14 +83,14 @@ function getUpstashLimiter(limit: number, windowMs: number): Ratelimit | null {
  * high-entropy Supabase Auth sessions (not brute-forceable), so this is defense-in-depth
  * against a leaked/compromised token being used for rapid abuse, not the primary control.
  *
- * 120/15min (8/min) was too tight for how the desktop admin actually behaves: its dashboard
+ * Counters live in this instance's memory. A cold start resets them. That is enough for
+ * one admin desktop and paired devices; a distributed store is not used.
+ *
+ * 1200/15min (8/min) was too tight for how the desktop admin actually behaves: its dashboard
  * reload fires 5 parallel calls (subs, sessions, requests, device-status, unlock-requests) on
- * every trigger, and it's retriggered by its own Supabase Realtime subscription "easily every
- * few seconds" under real device activity (see App.tsx). That easily exceeded the old budget
- * within 15 minutes, so whichever endpoint happened to hit the ceiling first would silently
- * fail for that reload -- looking exactly like "subs randomly show as 0" or "an action doesn't
- * show up until a manual reload," since the failure was per-endpoint and transient rather than
- * a visible, persistent error.
+ * every trigger, and it's retriggered by its own Supabase Realtime subscription. That easily
+ * exceeded the old budget within 15 minutes, so whichever endpoint happened to hit the ceiling
+ * first would silently fail for that reload.
  */
 export async function enforceAdminRateLimit(request: Request, routeKey: string) {
   return enforceRateLimit({
@@ -170,21 +104,8 @@ export async function enforceAdminRateLimit(request: Request, routeKey: string) 
 
 export async function enforceRateLimit(options: RateLimitOptions) {
   const { errorMessage, limit, request, routeKey, windowMs } = options;
+  recordRequestMetric(routeKey, "request");
   const bucketKey = `${routeKey}:${getClientIdentifier(request)}`;
-
-  const upstashLimiter = getUpstashLimiter(limit, windowMs);
-
-  if (upstashLimiter) {
-    const result = await upstashLimiter.limit(bucketKey);
-
-    if (!result.success) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
-      return jsonRateLimited(errorMessage, retryAfterSeconds);
-    }
-
-    return null;
-  }
-
   const now = Date.now();
   const store = getRateLimitStore();
   pruneExpiredBuckets(store, now);
