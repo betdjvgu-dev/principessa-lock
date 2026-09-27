@@ -14,6 +14,7 @@ import { isTransientReadError } from "@/lib/server/transient-read-error";
 export const dynamic = "force-dynamic";
 
 type SubRow = {
+  access_transfer_id?: string | null;
   created_at: string;
   id: string;
   label: string;
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await readAllPages((from, to) => supabase
     .from("subs")
-    .select("id, label, status, created_at")
+    .select("id, label, status, created_at, access_transfer_id")
     .order("created_at", { ascending: false })
     .order("id")
     .range(from, to)
@@ -56,7 +57,8 @@ export async function GET(request: Request) {
     return jsonSupabaseError("Failed to load subs.", error, isTransientReadError(error) ? 503 : 500);
   }
 
-  const subs = data ?? [];
+  // Transfer approvals must use the atomic transfer decision, not ordinary registration.
+  const subs = (data ?? []).filter(sub => !(sub.status === "invited" && sub.access_transfer_id));
 
   // Diagnostic: same intermittent empty-but-200 behaviour seen on admin/sessions. A zero here
   // means Supabase itself returned nothing for an unfiltered select.

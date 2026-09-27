@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
   // Snapshot-scoped delete: concurrent approvals and new requests are protected.
   const { data, error } = await getSupabaseAdminClient().from("subs")
-    .delete().in("id", [...new Set(ids)]).eq("status", "invited").select("id");
+    .delete().in("id", [...new Set(ids)]).eq("status", "invited").is("access_transfer_id", null).select("id");
   if (error) return jsonSupabaseError("Failed to reject pending access requests.", error);
   return jsonOk({ ok: true, rejectedIds: (data ?? []).map(row => row.id) });
 }

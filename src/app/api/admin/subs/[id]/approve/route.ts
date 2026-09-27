@@ -4,6 +4,7 @@ import { sendRegistrationApprovedPush } from "@/lib/server/fcm";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { transferError } from "@/lib/server/access-transfers";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -59,6 +60,7 @@ export async function POST(request: Request, context: RouteContext) {
     .maybeSingle<SubRow>();
 
   if (updateError) {
+    if (updateError.message?.startsWith("transfer_")) return transferError(updateError);
     return jsonSupabaseError("Failed to approve registration.", updateError);
   }
 

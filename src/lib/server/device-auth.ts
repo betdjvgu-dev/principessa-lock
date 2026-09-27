@@ -10,6 +10,7 @@ import { retrySupabaseRead } from "./retry-supabase-read";
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 
 type DeviceAuthRow = {
+  access_revoked_at: string | null;
   device_name: string;
   device_secret_hash: string | null;
   id: string;
@@ -89,7 +90,7 @@ export async function requireAuthenticatedDevice(
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
   const { data: device, error } = await retrySupabaseRead(() => supabase
     .from("devices")
-    .select("id, device_name, device_secret_hash, sub_id, subs(status)")
+    .select("id, device_name, device_secret_hash, sub_id, access_revoked_at, subs(status)")
     .eq("device_secret_hash", hashDeviceSecret(deviceSecret))
     .maybeSingle<DeviceAuthRow>());
 
@@ -100,7 +101,7 @@ export async function requireAuthenticatedDevice(
     };
   }
 
-  if (!device?.device_secret_hash) {
+  if (!device?.device_secret_hash || device.access_revoked_at) {
     return {
       ok: false,
       response: jsonError(401, "Invalid device bearer token."),

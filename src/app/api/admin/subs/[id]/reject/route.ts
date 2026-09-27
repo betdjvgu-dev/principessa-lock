@@ -50,6 +50,7 @@ export async function POST(request: Request, context: RouteContext) {
     .delete()
     .eq("id", id)
     .eq("status", "invited")
+    .is("access_transfer_id", null)
     .select("id, status")
     .maybeSingle<SubRow>();
 

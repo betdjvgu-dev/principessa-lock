@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
-  auth: vi.fn(), limit: vi.fn(), query: { delete: vi.fn(), in: vi.fn(), eq: vi.fn(), select: vi.fn() },
+  auth: vi.fn(), limit: vi.fn(), query: { delete: vi.fn(), in: vi.fn(), eq: vi.fn(), is: vi.fn(), select: vi.fn() },
   from: vi.fn(),
 }));
 vi.mock("@/lib/server/admin-auth", () => ({ verifyAdminRequest: mocks.auth }));
@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.auth.mockResolvedValue({ error: null }); mocks.limit.mockResolvedValue(null);
   mocks.from.mockReturnValue(mocks.query);
-  for (const method of [mocks.query.delete, mocks.query.in, mocks.query.eq]) method.mockReturnValue(mocks.query);
+  for (const method of [mocks.query.delete, mocks.query.in, mocks.query.eq, mocks.query.is]) method.mockReturnValue(mocks.query);
   mocks.query.select.mockResolvedValue({ data: [{ id }], error: null });
 });
 it("requires admin authentication before accessing data", async () => {
@@ -31,6 +31,7 @@ it("only deletes snapshot ids still invited in one database mutation", async () 
   expect(mocks.query.delete).toHaveBeenCalledTimes(1);
   expect(mocks.query.in).toHaveBeenCalledWith("id", [id]);
   expect(mocks.query.eq).toHaveBeenCalledWith("status", "invited");
+  expect(mocks.query.is).toHaveBeenCalledWith("access_transfer_id", null);
 });
 it("returns no deleted ids if requests were already approved", async () => {
   mocks.query.select.mockResolvedValue({ data: [], error: null });

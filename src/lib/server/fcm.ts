@@ -83,6 +83,19 @@ export async function sendNewSessionRequestPush(fcmToken: string | null | undefi
   await sendDataPush(fcmToken, { type: "new_session_request" });
 }
 
+export async function sendSessionActivatedPush(
+  fcmToken: string | null | undefined,
+  session: { sessionId: string; deviceName: string; sessionDays: number; dailyLimitMinutes: number },
+) {
+  return sendDataPush(fcmToken, {
+    type: "session_activated",
+    sessionId: session.sessionId,
+    deviceName: session.deviceName,
+    sessionDays: String(session.sessionDays),
+    dailyLimitMinutes: String(session.dailyLimitMinutes),
+  });
+}
+
 /** Wakes a sub's device to check for (and notify) an approved/rejected session request
  *  immediately -- without this, a sub only found out once they happened to reopen the app while
  *  it polled on its own (which could take minutes if the app was backgrounded). */

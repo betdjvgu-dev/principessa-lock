@@ -44,6 +44,13 @@ it("device lookup can recover without weakening ownership checks", async () => {
   expect(db.rpc).not.toHaveBeenCalled();
 });
 
+it("a revoked device is denied even if a stale secret lookup returns its row", async () => {
+  query.maybeSingle.mockResolvedValue({ data: { ...device, access_revoked_at: "2026-09-28T00:00:00Z" }, error: null });
+  const result = await requireAuthenticatedDevice(request(), undefined, { allowPendingSub: true });
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.response.status).toBe(401);
+});
+
 it("sync recovers a transient pause check and retains returned unlock configuration", async () => {
   authenticatedSession();
   db.rpc.mockResolvedValueOnce({ data: null, error: transient })

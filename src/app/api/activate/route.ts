@@ -6,6 +6,7 @@ import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
+import { notifyAdminSessionActivated } from "@/lib/server/session-activation-notification";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -351,5 +352,11 @@ export async function POST(request: Request) {
     console.error("Session was created but the request status update failed.", updateError);
   }
 
+  await notifyAdminSessionActivated({
+    sessionId: session.id,
+    deviceName: deviceAuth.device.deviceName,
+    sessionDays: session.session_days,
+    dailyLimitMinutes: session.daily_limit_minutes,
+  });
   return sessionResponse(deviceAuth.device.id, session);
 }

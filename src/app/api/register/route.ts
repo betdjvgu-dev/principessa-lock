@@ -5,6 +5,7 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateRegisterInput, type RegisterInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { transferError } from "@/lib/server/access-transfers";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -19,12 +20,16 @@ type CreatedSubRow = {
 
 type SubStatusRow = {
   status: string;
+  access_transfer_id: string | null;
 };
 
 type ExistingDeviceRow = {
+  access_revoked_at: string | null;
+  transfer_protected: boolean;
+  device_secret_hash: string | null;
   id: string;
   sub_id: string | null;
-  subs: { username: string | null; status: string } | { username: string | null; status: string }[] | null;
+  subs: { username: string | null; status: string; access_transfer_id?: string | null } | { username: string | null; status: string; access_transfer_id?: string | null }[] | null;
 };
 
 function extractSub(value: ExistingDeviceRow["subs"]) {
@@ -76,7 +81,7 @@ export async function POST(request: Request) {
   if (hardwareIdHash) {
     const { data: existingDevice, error: lookupError } = await supabase
       .from("devices")
-      .select("id, sub_id, subs(username, status)")
+      .select("id, sub_id, access_revoked_at, transfer_protected, device_secret_hash, subs(username, status, access_transfer_id)")
       .eq("hardware_id_hash", hardwareIdHash)
       .maybeSingle<ExistingDeviceRow>();
 
@@ -86,6 +91,15 @@ export async function POST(request: Request) {
 
     if (existingDevice) {
       const existingSub = extractSub(existingDevice.subs);
+      if (existingDevice.access_revoked_at || existingSub?.status === "archived") {
+        return jsonError(403, "This device no longer has access. Contact Principessa.");
+      }
+      // A hardware ID is not a credential. Transferred access must never be recoverable
+      // by replaying that public identity after the new device has been approved.
+      if ((existingDevice.transfer_protected || existingSub?.access_transfer_id) && (!suppliedDeviceSecret ||
+          hashDeviceSecret(suppliedDeviceSecret) !== existingDevice.device_secret_hash)) {
+        return jsonError(403, "Transferred access requires its original device credential. Contact Principessa.");
+      }
       const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
 
       const { error: updateError } = await supabase
@@ -104,6 +118,7 @@ export async function POST(request: Request) {
         .eq("id", existingDevice.id);
 
       if (updateError) {
+        if (updateError.message?.startsWith("transfer_")) return transferError(updateError);
         if (updateError.code === "23505") {
           return jsonError(409, "That device name is already taken. Choose another and try again.");
         }
@@ -237,7 +252,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from("subs")
-    .select("status")
+    .select("status, access_transfer_id")
     .eq("id", deviceAuth.device.subId)
     .maybeSingle<SubStatusRow>();
 
@@ -245,5 +260,14 @@ export async function GET(request: Request) {
     return jsonSupabaseError("Failed to load registration status.", error);
   }
 
+  if (data?.status === "invited" && data.access_transfer_id) {
+    const {data: transfer,error: transferLoadError}=await supabase.from("access_transfers")
+      .select("status,expires_at").eq("id",data.access_transfer_id).maybeSingle();
+    if(transferLoadError) return transferError(transferLoadError);
+    if(!transfer) return jsonError(503,"Transfer status is unavailable.");
+    if(transfer.status==='pending' && Date.parse(transfer.expires_at)<=Date.now()) {
+      return jsonOk({ok:true,status:"archived",transferStatus:"expired"});
+    }
+  }
   return jsonOk({ ok: true, status: data?.status ?? "active" });
 }
