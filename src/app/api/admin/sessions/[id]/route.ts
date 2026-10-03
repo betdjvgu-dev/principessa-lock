@@ -36,6 +36,7 @@ type SessionRow = {
   ends_at: string;
   forced_sleep_enabled: boolean;
   gallery_access_enabled: boolean;
+  gallery_access_consented: boolean;
   id: string;
   request_id: string;
   session_days: number;
@@ -197,7 +198,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { data: session, error: loadError } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented",
     )
     .eq("id", id)
     .maybeSingle<SessionRow>();
@@ -219,6 +220,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     return jsonError(409, "Only active sessions can be updated.");
   }
 
+  if (validation.data.galleryAccessEnabled === true && session.gallery_access_consented !== true) {
+    return jsonError(403, "Gallery access requires this session's explicit user consent.");
+  }
   const updatePayload = buildSessionUpdatePayload(session, validation.data);
 
   const input = validation.data;
@@ -249,7 +253,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .eq("updated_at", session.updated_at)
     .eq("status", session.status)
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented",
     )
     .maybeSingle<SessionRow>();
 

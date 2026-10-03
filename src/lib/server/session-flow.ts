@@ -16,6 +16,7 @@ export type SessionRequestRow = {
   forced_sleep_enabled: boolean;
   full_discretion: boolean;
   gallery_access_enabled: boolean;
+  gallery_access_consented: boolean;
   id: string;
   rejected_at: string | null;
   requested_days: number;

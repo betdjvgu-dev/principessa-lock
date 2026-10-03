@@ -19,6 +19,7 @@ type SessionLookupRow = {
   status: string;
   sub_id: string | null;
   gallery_access_enabled: boolean | null;
+  gallery_access_consented: boolean;
 };
 
 type CreatedActionRow = {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data: session, error: loadError } = await supabase
     .from("sessions")
-    .select("id, device_id, status, sub_id, gallery_access_enabled")
+    .select("id, device_id, status, sub_id, gallery_access_enabled, gallery_access_consented")
     .eq("id", validation.data.sessionId)
     .maybeSingle<SessionLookupRow>();
 
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
     return jsonError(409, "Remote actions can only be created for active sessions.");
   }
 
-  if (validation.data.actionType === "capture_gallery" && session.gallery_access_enabled !== true) {
+  if (validation.data.actionType === "capture_gallery" && (session?.gallery_access_enabled !== true || session?.gallery_access_consented !== true)) {
     return jsonError(403, "Gallery access is not enabled for this session.");
   }
 

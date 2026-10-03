@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { registerRealtimeAdmin } from "@/lib/server/realtime-admin";
 import { getServerEnv, getSupabaseAnonKey } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
@@ -57,6 +58,9 @@ export async function POST(request: Request) {
 
   const identityError = authorizeAdminEmail(data.session.user?.email);
   if (identityError) return identityError;
+
+  const realtimeError = await registerRealtimeAdmin(data.session.user.id);
+  if (realtimeError) return realtimeError;
 
   // The anon key is safe to hand back here (unlike the service-role key) -- it's meaningless
   // without a valid Supabase Auth JWT, and Row Level Security on the realtime-eligible tables

@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { notifyAdminDevices } from "@/lib/server/admin-push";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { sendNewSessionRequestPush, sendSessionRequestDecisionPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
@@ -46,6 +47,7 @@ function buildInsertPayload(
     forced_sleep_enabled: input.forcedSleepEnabled,
     full_discretion: input.fullDiscretion,
     gallery_access_enabled: input.galleryAccessEnabled,
+    gallery_access_consented: input.galleryAccessEnabled,
     requested_days: input.sessionDays,
     screen_time_enabled: input.screenTimeEnabled,
     sub_id: subId,
@@ -146,12 +148,7 @@ export async function POST(request: Request) {
   } else {
     // Single-admin model -- there is at most one row in admin_push_tokens, for whichever
     // physical device the keyholder is currently logged into the in-app admin console on.
-    const { data: adminToken } = await supabase
-      .from("admin_push_tokens")
-      .select("fcm_token")
-      .maybeSingle<{ fcm_token: string | null }>();
-
-    await sendNewSessionRequestPush(adminToken?.fcm_token);
+    await notifyAdminDevices(token => sendNewSessionRequestPush(token));
   }
 
   return jsonOk(

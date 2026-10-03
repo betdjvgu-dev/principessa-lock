@@ -2,7 +2,6 @@ import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateActivateInput, type ActivateInput } from "@/lib/server/request-validation";
-import { calculateSessionPriceUsd } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
@@ -35,12 +34,6 @@ type SessionRow = {
   timezone: string | null;
   updated_at: string;
 };
-
-function addDays(timestamp: Date, days: number) {
-  const next = new Date(timestamp);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 
@@ -259,104 +252,23 @@ export async function POST(request: Request) {
     return jsonError(410, "Approval has expired. Ask your keyholder to approve a new request.");
   }
 
-  const startsAt = new Date();
-  const endsAt = addDays(startsAt, sessionRequest.requested_days);
-  const activatedAt = new Date().toISOString();
-
-  // A physical device should never be enforcing more than one session's rules at once. Without
-  // this, an approved request activating while an earlier session on the same device was still
-  // (for whatever reason) marked "active" left both rows active side by side -- the admin
-  // dashboard would show two active sessions for one device, and if the device's local app ever
-  // reverted to the older one (a stale sync, a race), the wrong daily limit/rules would enforce.
-  const { error: supersedeError } = await supabase
-    .from("sessions")
-    .update({ status: "revoked" })
-    .eq("device_id", deviceAuth.device.id)
-    .eq("status", "active");
-
-  if (supersedeError) {
-    return jsonSupabaseError("Failed to supersede the device's previous active session.", supersedeError);
+  // The database serializes activation per device and commits all three changes together.
+  const { data: activation, error } = await supabase.rpc("activate_device_session", {
+    p_device_id: deviceAuth.device.id,
+    p_request_id: sessionRequest.id,
+    p_timezone: validation.data.timezone ?? null,
+  });
+  if (error) {
+    if (error.message?.includes("activation_expired")) return jsonError(410, "Approval has expired. Ask your keyholder to approve a new request.");
+    if (error.message?.includes("activation_terminal")) return jsonError(410, "This session has already ended. Request a new session.");
+    if (error.message?.includes("activation_unavailable")) return jsonError(409, "Request changed. Refresh and try again.");
+    return jsonSupabaseError("Failed to activate session.", error);
   }
-
-  const { data: session, error: sessionError } = await supabase
-    .from("sessions")
-    .insert({
-      activated_at: activatedAt,
-      always_allowed_package: sessionRequest.always_allowed_package,
-      daily_limit_minutes: sessionRequest.daily_limit_minutes,
-      device_id: deviceAuth.device.id,
-      ends_at: endsAt.toISOString(),
-      forced_sleep_enabled: sessionRequest.forced_sleep_enabled,
-      gallery_access_enabled: sessionRequest.gallery_access_enabled,
-      price_usd: calculateSessionPriceUsd(
-        sessionRequest.full_discretion,
-        sessionRequest.gallery_access_enabled,
-        sessionRequest.daily_limit_minutes,
-        sessionRequest.requested_days,
-        sessionRequest.screen_time_enabled,
-      ),
-      request_id: sessionRequest.id,
-      session_days: sessionRequest.requested_days,
-      screen_time_enabled: sessionRequest.screen_time_enabled,
-      sleep_end_time: "07:00",
-      sleep_start_time: "23:00",
-      starts_at: startsAt.toISOString(),
-      status: "active",
-      sub_id: sessionRequest.sub_id,
-      timezone: validation.data.timezone ?? null,
-    })
-    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, paused_at")
-    .maybeSingle<SessionRow>();
-
-  if (sessionError) {
-    if (sessionError.code === "23505") {
-      const { data: concurrentSession, error: concurrentSessionError } = await supabase
-        .from("sessions")
-        .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, paused_at")
-        .eq("request_id", sessionRequest.id)
-        .eq("device_id", deviceAuth.device.id)
-        .eq("status", "active")
-        .maybeSingle<SessionRow>();
-
-      if (concurrentSessionError) {
-        return jsonSupabaseError("Failed to recover the concurrently activated session.", concurrentSessionError);
-      }
-
-      if (concurrentSession) {
-        return sessionResponse(deviceAuth.device.id, concurrentSession);
-      }
-
-      return jsonError(409, "This request has already been activated, but its session could not be recovered.");
-    }
-
-    return jsonSupabaseError("Failed to create session.", sessionError);
-  }
-
-  if (!session) {
-    return jsonError(500, "Session creation did not return a row.");
-  }
-
-  const { error: updateError } = await supabase
-    .from("session_requests")
-    .update({
-      activated_at: activatedAt,
-      status: "activated",
-    })
-    .eq("id", sessionRequest.id)
-    .eq("status", "approved");
-
-  if (updateError) {
-    // The session is already authoritative and usable. Returning it prevents a transient request
-    // status update failure from stranding the Android client; the next activation retry repairs
-    // the request through the sessionForRequest branch above.
-    console.error("Session was created but the request status update failed.", updateError);
-  }
-
-  await notifyAdminSessionActivated({
-    sessionId: session.id,
-    deviceName: deviceAuth.device.deviceName,
-    sessionDays: session.session_days,
-    dailyLimitMinutes: session.daily_limit_minutes,
+  if (!activation?.session) return jsonError(500, "Activation did not return a session.");
+  const session = activation.session as SessionRow;
+  if (activation.created) await notifyAdminSessionActivated({
+    sessionId: session.id, deviceName: deviceAuth.device.deviceName,
+    sessionDays: session.session_days, dailyLimitMinutes: session.daily_limit_minutes,
   });
   return sessionResponse(deviceAuth.device.id, session);
 }

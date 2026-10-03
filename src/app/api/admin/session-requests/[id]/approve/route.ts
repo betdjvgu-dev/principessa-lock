@@ -84,6 +84,10 @@ export async function POST(request: Request, context: RouteContext) {
 
   const overrides: ApproveSessionRequestInput = sessionRequest.full_discretion ? overrideValidation.data : {};
 
+  if (overrides.galleryAccessEnabled === true && !sessionRequest.gallery_access_consented) {
+    return jsonError(403, "Gallery access was not consented to by the user.");
+  }
+
   if (sessionRequest.full_discretion) {
     const { error: overrideError } = await supabase
       .from("session_requests")

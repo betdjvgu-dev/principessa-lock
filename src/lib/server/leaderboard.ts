@@ -5,6 +5,8 @@ export type LeaderboardSession = {
   session_days: number | null;
   starts_at: string | null;
   status: string | null;
+  paused_at?: string | null;
+  total_paused_ms?: number | null;
 };
 
 export function getSuccessfullyCompletedDays(session: LeaderboardSession, now = new Date()): number {
@@ -22,7 +24,10 @@ export function getSuccessfullyCompletedDays(session: LeaderboardSession, now = 
   }
 
   const successfullySurvivedUntil = Math.min(nowAt, endsAt);
-  const elapsedFullDays = Math.floor(Math.max(0, successfullySurvivedUntil - startsAt) / DAY_MS);
+  const pauseStart = Date.parse(session.paused_at ?? "");
+  const currentPause = Number.isFinite(pauseStart) ? Math.max(0, successfullySurvivedUntil - Math.max(startsAt, pauseStart)) : 0;
+  const pastPause = Math.max(0, Number(session.total_paused_ms) || 0);
+  const elapsedFullDays = Math.floor(Math.max(0, successfullySurvivedUntil - startsAt - pastPause - currentPause) / DAY_MS);
 
   return Math.min(configuredDays, elapsedFullDays);
 }

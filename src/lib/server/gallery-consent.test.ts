@@ -23,8 +23,19 @@ it.each([false, null, undefined])("rejects gallery capture without session conse
   expect((await POST(create())).status).toBe(403);
   expect(query.insert).not.toHaveBeenCalled();
 });
+it("an admin-enabled flag cannot replace the user's consent", async () => {
+  query.maybeSingle.mockResolvedValue({ data: { id: sessionId, status: "active", gallery_access_enabled: true, gallery_access_consented: false } });
+  expect((await POST(create())).status).toBe(403);
+  expect(query.insert).not.toHaveBeenCalled();
+});
+it("a repeated successful acknowledgement is idempotent without rewriting its result", async () => {
+  query.maybeSingle.mockResolvedValueOnce({ data: { id: "action", session_id: sessionId, action_type: "clear_local_usage", status: "completed" } });
+  const response = await complete(new Request("http://localhost", {method:"POST",body:JSON.stringify({ok:true,result:{}})}), {params:Promise.resolve({id:"action"})});
+  expect(response.status).toBe(200);
+  expect(query.update).not.toHaveBeenCalled();
+});
 it.each(["capture_gallery", "capture_screenshot"])("allows intended capture with appropriate consent: %s", async (actionType) => {
-  query.maybeSingle.mockResolvedValueOnce({ data: { id: sessionId, status: "active", gallery_access_enabled: actionType === "capture_gallery" } })
+  query.maybeSingle.mockResolvedValueOnce({ data: { id: sessionId, status: "active", gallery_access_enabled: actionType === "capture_gallery", gallery_access_consented: actionType === "capture_gallery" } })
     .mockResolvedValueOnce({ data: { id: "action", status: "pending" } });
   expect((await POST(create(actionType))).status).toBe(200);
   expect(query.insert).toHaveBeenCalled();

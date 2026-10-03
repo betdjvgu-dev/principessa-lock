@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
   const fcmToken = bodyResult.data.fcmToken;
 
-  if (!fcmToken || typeof fcmToken !== "string") {
+  if (!fcmToken || typeof fcmToken !== "string" || fcmToken.length > 4096) {
     return jsonError(400, "fcmToken is required.");
   }
 
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     admin_user_id: auth.identity.id,
     fcm_token: fcmToken,
     updated_at: new Date().toISOString(),
-  });
+  }, { onConflict: "admin_user_id,fcm_token" });
 
   if (error) {
     return jsonSupabaseError("Failed to register admin FCM token.", error);

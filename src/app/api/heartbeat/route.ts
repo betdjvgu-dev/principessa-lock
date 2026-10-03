@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { notifyAdminDevices } from "@/lib/server/admin-push";
 import { requireAuthenticatedDevice, verifySessionOwnershipForDevice } from "@/lib/server/device-auth";
 import { sendProtectionTamperAlertPush } from "@/lib/server/fcm";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
@@ -83,6 +84,13 @@ export async function POST(request: Request) {
 
   if (!sessionOwnership.ok) {
     return sessionOwnership.response;
+  }
+  const historySessions = [...new Set((heartbeat.usageHistory ?? []).map(row => row.sessionId ?? heartbeat.sessionId))];
+  if (historySessions.some(id => id !== heartbeat.sessionId)) {
+    const { data: owned, error } = await supabase.from("sessions").select("id")
+      .in("id", historySessions).eq("device_id", deviceAuth.device.id);
+    if (error) return jsonSupabaseError("Failed to verify usage history ownership.", error);
+    if (owned?.length !== historySessions.length) return jsonError(403, "Usage history contains another device's session.");
   }
 
   const { error: insertError } = await supabase.from("device_heartbeats").insert({
@@ -212,9 +220,7 @@ export async function POST(request: Request) {
         const { error: attemptError } = await supabase.from("devices")
           .update({ last_protection_alert_attempt_at: new Date().toISOString() }).eq("id", deviceAuth.device.id);
         if (attemptError) throw attemptError;
-        const { data: adminToken } = await supabase.from("admin_push_tokens")
-          .select("fcm_token").maybeSingle<{ fcm_token: string | null }>();
-        const accepted = await sendProtectionTamperAlertPush(adminToken?.fcm_token, heartbeat.deviceName, reason);
+        const accepted = await notifyAdminDevices(token => sendProtectionTamperAlertPush(token, heartbeat.deviceName, reason));
         if (accepted) {
           const { error: sentError } = await supabase.from("devices").update({
             last_tamper_alert_at: new Date().toISOString(), last_tamper_alert_reason: reason,
@@ -232,6 +238,13 @@ export async function POST(request: Request) {
   // Best-effort: only the fields needed for the usage-history chart. Missing any of them
   // (older app builds, a heartbeat sent before the session engine has a local date yet)
   // just skips this day's row rather than failing the whole heartbeat.
+  if (heartbeat.usageHistory?.length) {
+    const { error } = await supabase.from("session_daily_usage").upsert(heartbeat.usageHistory.map(row => ({
+      session_id: row.sessionId ?? heartbeat.sessionId, local_date: row.localDate, used_minutes: row.usedMinutes,
+      limit_minutes: row.dailyLimitMinutes,
+    })), { onConflict: "session_id,local_date" });
+    if (error) return jsonOk({ ok: true, usageHistorySaved: false });
+  }
   if (heartbeat.localDate && heartbeat.usedMinutes !== undefined && heartbeat.dailyLimitMinutes !== undefined) {
     const { error: usageError } = await supabase.from("session_daily_usage").upsert(
       {
@@ -253,5 +266,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return jsonOk({ ok: true });
+  return jsonOk({ ok: true, usageHistorySaved: true });
 }

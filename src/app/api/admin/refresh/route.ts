@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { registerRealtimeAdmin } from "@/lib/server/realtime-admin";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
@@ -56,9 +57,14 @@ export async function POST(request: Request) {
 
   const identityError = authorizeAdminEmail(data.session.user?.email);
   if (identityError) return identityError;
+  // Auth has already rotated the refresh token. Never lose that replacement because
+  // optional Realtime setup failed; API authorization still verifies ADMIN_EMAIL.
+  const realtimeError = await registerRealtimeAdmin(data.session.user.id).catch(() => true);
+  if (realtimeError) console.warn("Admin refresh succeeded; Realtime authorization setup will retry.");
 
   return jsonOk({
     ok: true,
+    realtimeReady: !realtimeError,
     session: {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,

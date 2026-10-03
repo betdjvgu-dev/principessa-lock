@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
 export function jsonOk<T extends Record<string, unknown>>(body: T, init?: ResponseInit) {
-  return NextResponse.json(body, init);
+  const headers = new Headers(init?.headers);
+  headers.set("Date", new Date().toUTCString());
+  return NextResponse.json(body, { ...init, headers });
 }
 
 export function jsonError(status: number, error: string, details?: Record<string, unknown>) {

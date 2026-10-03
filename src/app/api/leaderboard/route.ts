@@ -4,6 +4,7 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSuccessfullyCompletedDays } from "@/lib/server/leaderboard";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { readAllPages } from "@/lib/server/read-pages";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -17,6 +18,8 @@ type SessionDaysRow = {
   session_days: number | null;
   starts_at: string | null;
   status: string | null;
+  paused_at: string | null;
+  total_paused_ms: number;
   sub_id: string | null;
   subs: { username: string | null } | null;
 };
@@ -41,10 +44,10 @@ export async function GET(request: Request) {
     return deviceAuth.response;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await readAllPages((from, to) => supabase
     .from("sessions")
-    .select("sub_id, session_days, starts_at, ends_at, status, subs(username)")
-    .returns<SessionDaysRow[]>();
+    .select("sub_id, session_days, starts_at, ends_at, status, paused_at, total_paused_ms, subs(username)")
+    .order("id").range(from, to).returns<SessionDaysRow[]>());
 
   if (error) {
     return jsonSupabaseError("Failed to load leaderboard.", error);

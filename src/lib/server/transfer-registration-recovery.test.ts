@@ -13,6 +13,10 @@ beforeEach(()=>{vi.resetAllMocks();m.limit.mockResolvedValue(null);m.q.select.mo
 it.each([undefined,"plock_"+"z".repeat(43)])("hardware ID cannot recover transferred access without original secret",async value=>{
   expect((await POST(req(value))).status).toBe(403);expect(m.q.update).not.toHaveBeenCalled();
 });
+it.each([undefined,"plock_"+"z".repeat(43)])("ordinary hardware identity is not an authentication credential",async value=>{
+  m.q.maybeSingle.mockResolvedValue({ data: { ...row, transfer_protected: false, subs: { status: "active", username: "owner", access_transfer_id: null } }, error: null });
+  expect((await POST(req(value))).status).toBe(403);expect(m.q.update).not.toHaveBeenCalled();
+});
 it("even the former correct secret cannot recover a revoked source",async()=>{
   m.q.maybeSingle.mockResolvedValue({data:{...row,access_revoked_at:"2026-09-28T00:00:00Z",subs:{status:"archived"}},error:null});
   expect((await POST(req(secret))).status).toBe(403);expect(m.q.update).not.toHaveBeenCalled();

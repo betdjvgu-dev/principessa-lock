@@ -13,6 +13,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { checkReleaseApk } = require("./apk-release-check");
 
 function loadEnvLocal() {
   const envPath = path.join(__dirname, "..", ".env.local");
@@ -113,8 +114,8 @@ async function main() {
   if (!fs.existsSync(resolvedApkPath)) {
     throw new Error(`APK not found at: ${resolvedApkPath}`);
   }
-
   const env = { ...loadEnvLocal(), ...process.env };
+  checkReleaseApk(resolvedApkPath, versionCode, versionName, env);
   const {
     GITHUB_RELEASE_REPOSITORY,
     GITHUB_RELEASE_TOKEN,

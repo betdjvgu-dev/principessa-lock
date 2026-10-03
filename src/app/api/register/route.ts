@@ -1,3 +1,4 @@
+import { notifyAdminDevices } from "@/lib/server/admin-push";
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { generateDeviceSecret, hashDeviceSecret, requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { sendNewRegistrationPush } from "@/lib/server/fcm";
@@ -74,10 +75,8 @@ export async function POST(request: Request) {
   } = validation.data;
   const supabase = getSupabaseAdminClient();
 
-  // Recovery path: the same physical device (same ANDROID_ID + app signing key) registering
-  // again, most likely after an uninstall/reinstall wiped its locally-stored device secret.
-  // Rotates the secret in place instead of creating a brand new account -- a paid/approved sub
-  // shouldn't lose that status (or have to pick a new username) just because they reinstalled.
+  // Recover idempotent registration retries only with the original credential.
+  // A known hardware identity is public metadata, not proof of paid-access ownership.
   if (hardwareIdHash) {
     const { data: existingDevice, error: lookupError } = await supabase
       .from("devices")
@@ -96,9 +95,9 @@ export async function POST(request: Request) {
       }
       // A hardware ID is not a credential. Transferred access must never be recoverable
       // by replaying that public identity after the new device has been approved.
-      if ((existingDevice.transfer_protected || existingSub?.access_transfer_id) && (!suppliedDeviceSecret ||
-          hashDeviceSecret(suppliedDeviceSecret) !== existingDevice.device_secret_hash)) {
-        return jsonError(403, "Transferred access requires its original device credential. Contact Principessa.");
+      if (!suppliedDeviceSecret ||
+          hashDeviceSecret(suppliedDeviceSecret) !== existingDevice.device_secret_hash) {
+        return jsonError(403, "Device credential required. Contact Principessa to recover or transfer your access.", { recoveryRequired: true });
       }
       const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
 
@@ -197,16 +196,7 @@ export async function POST(request: Request) {
     return jsonSupabaseError("Failed to register device.", deviceError);
   }
 
-  // Single-admin model -- there is at most one row in admin_push_tokens, for whichever physical
-  // device the keyholder is currently logged into the in-app admin console on. Only the fresh
-  // registration path reaches here (the hardwareIdHash recovery branch above returns earlier) --
-  // a device recovering an existing, already-approved sub isn't a new thing to review.
-  const { data: adminToken } = await supabase
-    .from("admin_push_tokens")
-    .select("fcm_token")
-    .maybeSingle<{ fcm_token: string | null }>();
-
-  await sendNewRegistrationPush(adminToken?.fcm_token, username);
+  await notifyAdminDevices(token => sendNewRegistrationPush(token, username));
 
   return jsonOk(
     {

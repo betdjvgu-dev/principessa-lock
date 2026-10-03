@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
+import { registerRealtimeAdmin } from "@/lib/server/realtime-admin";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody } from "@/lib/server/request-validation";
 import { createIsolatedSupabaseClient } from "@/lib/server/supabase-admin";
@@ -98,6 +99,8 @@ export async function POST(request: Request) {
     return jsonError(500, "Lock admin session could not be created.");
   }
 
+  const identityError = await registerRealtimeAdmin(sessionData.session.user.id);
+  if (identityError) return identityError;
   return jsonOk({
     ok: true,
     session: {

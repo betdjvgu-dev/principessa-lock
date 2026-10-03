@@ -1,5 +1,6 @@
 import { getServerEnv, getSupabaseAnonKey } from "@/lib/env";
 import { jsonOk } from "@/lib/server/api-response";
+import { registerRealtimeAdmin } from "@/lib/server/realtime-admin";
 import { verifyAdminRequest } from "@/lib/server/admin-auth";
 import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 
@@ -27,6 +28,8 @@ export async function GET(request: Request) {
     return auth.error;
   }
 
+  const realtimeError = await registerRealtimeAdmin(auth.identity.id);
+  if (realtimeError) return realtimeError;
   return jsonOk({
     ok: true,
     supabase: {

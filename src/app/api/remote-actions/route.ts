@@ -62,10 +62,11 @@ export async function GET(request: Request) {
   let actions = data ?? [];
   if (actions.some((action) => action.action_type === "capture_gallery")) {
     const { data: session, error: consentError } = await supabase.from("sessions")
-      .select("gallery_access_enabled, status").eq("id", sessionId)
-      .maybeSingle<{ gallery_access_enabled: boolean | null; status: string }>();
+      .select("gallery_access_enabled, gallery_access_consented, status").eq("id", sessionId)
+      .maybeSingle<{ gallery_access_enabled: boolean | null;
+  gallery_access_consented: boolean; status: string }>();
     if (consentError) return jsonSupabaseError("Failed to verify gallery access.", consentError);
-    if (session?.gallery_access_enabled !== true || session.status !== "active") {
+    if ((session?.gallery_access_enabled !== true || session?.gallery_access_consented !== true) || session.status !== "active") {
       const deniedIds = actions.filter((action) => action.action_type === "capture_gallery").map((action) => action.id);
       const { error: cancelError } = await supabase.from("device_remote_actions")
         .update({ status: "failed", failed_at: new Date().toISOString(), error_message: "Gallery access is not enabled for this session." })

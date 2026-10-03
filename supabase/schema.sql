@@ -785,12 +785,38 @@ execute function public.set_updated_at();
 -- Realtime subscription (see desktop-admin/src/lib/realtime.ts) instead of relying solely on
 -- 60-second REST polling to notice new session/unlock requests, messages, and device heartbeats.
 --
--- There is exactly one keyholder identity in this whole product (single-admin model, enforced by
--- ADMIN_EMAIL in backend/src/lib/server/admin-auth.ts) and no other flow ever mints a Supabase
--- Auth JWT (devices authenticate with a separate bearer-secret scheme, not Supabase Auth) -- so
--- "the request carries a valid Supabase Auth session" is already equivalent to "this is the
--- keyholder." A plain `auth.role() = 'authenticated'` policy is therefore sufficient; there is no
--- second identity for it to leak data to.
+-- Authenticated does not mean administrator. Populate this server-only allowlist only
+-- after ADMIN_EMAIL has been verified; see phase-audit-hardening-20261003.sql.
+create table if not exists public.admin_rls_identities (
+  user_id uuid primary key, created_at timestamptz not null default now()
+);
+alter table public.admin_rls_identities enable row level security;
+revoke all on public.admin_rls_identities from public, anon, authenticated;
+grant all on public.admin_rls_identities to service_role;
+create or replace function public.is_lock_admin() returns boolean
+language sql stable security definer set search_path=pg_catalog,public as $$
+  select exists(select 1 from public.admin_rls_identities where user_id=auth.uid());
+$$;
+revoke all on function public.is_lock_admin() from public, anon;
+grant execute on function public.is_lock_admin() to authenticated, service_role;
+do $$
+declare t text;
+begin
+  foreach t in array array['subs','devices','sessions','session_daily_usage','session_requests',
+    'session_messages','app_unlock_requests','device_heartbeats','device_remote_actions',
+    'admin_push_tokens','app_releases','crash_reports'] loop
+    execute format('alter table public.%I enable row level security',t);
+    execute format('revoke all on public.%I from public,anon,authenticated',t);
+    execute format('grant all on public.%I to service_role',t);
+  end loop;
+end $$;
+grant select on public.subs,public.sessions,public.session_requests,public.app_unlock_requests,
+  public.session_messages,public.device_heartbeats,public.device_remote_actions to authenticated;
+drop policy if exists admin_read_subs on public.subs;
+create policy admin_read_subs on public.subs for select to authenticated using ((select public.is_lock_admin()));
+drop policy if exists admin_read_sessions on public.sessions;
+create policy admin_read_sessions on public.sessions for select to authenticated using ((select public.is_lock_admin()));
+
 alter table public.session_requests enable row level security;
 alter table public.app_unlock_requests enable row level security;
 alter table public.session_messages enable row level security;
@@ -800,27 +826,27 @@ alter table public.device_remote_actions enable row level security;
 drop policy if exists admin_read_session_requests on public.session_requests;
 create policy admin_read_session_requests
   on public.session_requests for select
-  using (auth.role() = 'authenticated');
+  using ((select public.is_lock_admin()));
 
 drop policy if exists admin_read_app_unlock_requests on public.app_unlock_requests;
 create policy admin_read_app_unlock_requests
   on public.app_unlock_requests for select
-  using (auth.role() = 'authenticated');
+  using ((select public.is_lock_admin()));
 
 drop policy if exists admin_read_session_messages on public.session_messages;
 create policy admin_read_session_messages
   on public.session_messages for select
-  using (auth.role() = 'authenticated');
+  using ((select public.is_lock_admin()));
 
 drop policy if exists admin_read_device_heartbeats on public.device_heartbeats;
 create policy admin_read_device_heartbeats
   on public.device_heartbeats for select
-  using (auth.role() = 'authenticated');
+  using ((select public.is_lock_admin()));
 
 drop policy if exists admin_read_device_remote_actions on public.device_remote_actions;
 create policy admin_read_device_remote_actions
   on public.device_remote_actions for select
-  using (auth.role() = 'authenticated');
+  using ((select public.is_lock_admin()));
 
 -- `alter publication ... add table` errors if the table is already a publication member, so this
 -- guards each one with an existence check to stay safely re-runnable (this file gets re-pasted

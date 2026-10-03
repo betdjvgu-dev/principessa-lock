@@ -1,4 +1,5 @@
 import { jsonError } from "@/lib/server/api-response";
+import { validUsageHistory, type UsageHistoryEntry } from "./usage-history";
 
 export type SessionRequestInput = {
   alwaysAllowedPackage?: string;
@@ -106,6 +107,7 @@ export type SettingsPinInput = {
 };
 
 export type HeartbeatInput = {
+  usageHistory?: UsageHistoryEntry[];
   accessibilityGranted?: boolean;
   accessibilityRunning?: boolean;
   activeSessionPresent?: boolean;
@@ -238,11 +240,32 @@ function isProtectedSystemPackage(packageName: string) {
   );
 }
 
-export async function readJsonBody<T>(request: Request) {
+export async function readJsonBody<T>(request: Request, maximumBytes = 4_000_000) {
   try {
+    if (Number(request.headers.get("content-length")) > maximumBytes) {
+      return { ok: false as const, response: jsonError(413, "Request body is too large.") };
+    }
+    const reader = request.body?.getReader();
+    if (!reader) return { ok: false as const, response: jsonError(400, "JSON request body is required.") };
+    const decoder = new TextDecoder();
+    let length = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > maximumBytes) {
+          await reader.cancel();
+          return { ok: false as const, response: jsonError(413, "Request body is too large.") };
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally { reader.releaseLock(); }
     return {
       ok: true as const,
-      data: (await request.json()) as T,
+      data: JSON.parse(text) as T,
     };
   } catch {
     return {
@@ -761,6 +784,9 @@ export function validateHeartbeatInput(input: unknown) {
   const deviceName = normalizeRequiredString(payload.deviceName);
   const sessionStatus = normalizeRequiredString(payload.sessionStatus);
   const protectionState = normalizeRequiredString(payload.protectionState);
+  if (payload.usageHistory !== undefined && !validUsageHistory(payload.usageHistory)) {
+    return { ok: false as const, response: jsonError(400, "usageHistory must contain at most 31 valid daily snapshots.") };
+  }
 
   if (!sessionId) {
     return { ok: false as const, response: jsonError(400, "sessionId is required.") };
@@ -956,6 +982,7 @@ export function validateHeartbeatInput(input: unknown) {
       lastUsageRefreshAt: normalizeOptionalString(payload.lastUsageRefreshAt) ?? undefined,
       limitReached: payload.limitReached as boolean | undefined,
       localDate: normalizeOptionalString(payload.localDate) ?? undefined,
+      usageHistory: payload.usageHistory as UsageHistoryEntry[] | undefined,
       networkConnected: payload.networkConnected as boolean | undefined,
       activityRecognitionGranted: payload.activityRecognitionGranted as boolean | undefined,
       overlayActive: payload.overlayActive as boolean | undefined,

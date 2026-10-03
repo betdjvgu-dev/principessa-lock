@@ -75,16 +75,18 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   if (action.status !== "pending") {
+    const expected = validation.data.ok ? "completed" : "failed";
+    if (action.status === expected) return jsonOk({ ok: true, action: { id: action.id, status: action.status } });
     return jsonError(409, "Remote action is no longer pending.");
   }
 
   let galleryConsentDenied = false;
   if (action.action_type === "capture_gallery") {
     const { data: session, error: consentError } = await supabase.from("sessions")
-      .select("gallery_access_enabled, status").eq("id", action.session_id)
-      .maybeSingle<{ gallery_access_enabled: boolean | null; status: string }>();
+      .select("gallery_access_enabled, gallery_access_consented, status").eq("id", action.session_id)
+      .maybeSingle<{ gallery_access_enabled: boolean | null; gallery_access_consented: boolean; status: string }>();
     if (consentError) return jsonSupabaseError("Failed to verify gallery access.", consentError);
-    galleryConsentDenied = session?.gallery_access_enabled !== true || session.status !== "active";
+    galleryConsentDenied = (session?.gallery_access_enabled !== true || session?.gallery_access_consented !== true) || session.status !== "active";
   }
 
   const now = new Date().toISOString();

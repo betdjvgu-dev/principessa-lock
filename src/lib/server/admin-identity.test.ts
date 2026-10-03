@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const { auth } = vi.hoisted(() => ({ auth: { getUser: vi.fn(), signInWithPassword: vi.fn(), refreshSession: vi.fn() } }));
 vi.mock("./supabase-admin", () => ({ getSupabaseAdminClient: () => ({ auth }), createIsolatedSupabaseClient: () => ({ auth }) }));
 vi.mock("./rate-limit", () => ({ enforceRateLimit: async () => null }));
+vi.mock("./realtime-admin", () => ({ registerRealtimeAdmin: async () => null }));
 vi.mock("@/lib/env", () => ({ getSupabaseAnonKey: () => "public-key", getServerEnv: () => ({ SUPABASE_URL: "https://example.supabase.co" }) }));
 import { authorizeAdminEmail } from "./admin-identity";
 import { verifyAdminRequest } from "./admin-auth";

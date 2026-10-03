@@ -41,8 +41,8 @@ export async function POST(request: Request) {
 
   const hardwareIdHash = typeof bodyResult.data?.hardwareIdHash === "string" ? bodyResult.data.hardwareIdHash.trim() : "";
 
-  if (!hardwareIdHash) {
-    return jsonError(400, "hardwareIdHash is required.");
+  if (!/^[a-f0-9]{64}$/i.test(hardwareIdHash)) {
+    return jsonError(400, "hardwareIdHash must be a SHA-256 hex digest.");
   }
 
   const supabase = getSupabaseAdminClient();
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   const { error: updateError } = await supabase
     .from("devices")
     .update({ hardware_id_hash: hardwareIdHash })
-    .eq("id", deviceAuth.device.id);
+    .eq("id", deviceAuth.device.id).is("hardware_id_hash", null);
 
   if (updateError) {
     // Another device already claims this hash (shouldn't happen in practice) -- non-fatal, this

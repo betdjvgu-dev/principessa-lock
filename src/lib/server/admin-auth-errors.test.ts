@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const { auth } = vi.hoisted(() => ({ auth: { getUser: vi.fn(), refreshSession: vi.fn() } }));
+const { auth, registerRealtimeAdmin } = vi.hoisted(() => ({
+  auth: { getUser: vi.fn(), refreshSession: vi.fn() }, registerRealtimeAdmin: vi.fn(),
+}));
 vi.mock("./supabase-admin", () => ({
   getSupabaseAdminClient: () => ({ auth }), createIsolatedSupabaseClient: () => ({ auth }),
 }));
 vi.mock("./rate-limit", () => ({ enforceRateLimit: async () => null }));
+vi.mock("./realtime-admin", () => ({ registerRealtimeAdmin }));
 import { adminAuthFailure } from "./admin-auth-errors";
 import { verifyAdminRequest } from "./admin-auth";
 import { POST as refresh } from "../../app/api/admin/refresh/route";
@@ -11,7 +14,11 @@ import { POST as refresh } from "../../app/api/admin/refresh/route";
 const refreshRequest = () => new Request("http://localhost/api/admin/refresh", {
   method: "POST", body: JSON.stringify({ refreshToken: "test-token" }),
 });
-beforeEach(() => { vi.resetAllMocks(); vi.stubEnv("ADMIN_EMAIL", "admin@example.test"); });
+beforeEach(() => {
+  vi.resetAllMocks();
+  registerRealtimeAdmin.mockResolvedValue(null);
+  vi.stubEnv("ADMIN_EMAIL", "admin@example.test");
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe("admin authentication failure classification", () => {
@@ -57,6 +64,14 @@ describe("admin routes preserve the distinction", () => {
     const response = await refresh(refreshRequest());
     expect(response.status).toBe(200);
     expect((await response.json()).session.refreshToken).toBe("new-refresh");
+  });
+  it.each(["response", "network"])("preserves rotated credentials when Realtime setup fails: %s", async (failure) => {
+    auth.refreshSession.mockResolvedValue({ data: { session: { user: { id: "admin-id", email: "admin@example.test" }, access_token: "new-access", refresh_token: "new-refresh" } }, error: null });
+    if (failure === "network") registerRealtimeAdmin.mockRejectedValue(new Error("offline"));
+    else registerRealtimeAdmin.mockResolvedValue(new Response(null, { status: 503 }));
+    const response = await refresh(refreshRequest());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ realtimeReady: false, session: { refreshToken: "new-refresh" } });
   });
   it("denies protected routes temporarily when auth verification is offline", async () => {
     auth.getUser.mockRejectedValue(new Error("offline"));
