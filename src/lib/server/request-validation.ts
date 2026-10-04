@@ -220,6 +220,7 @@ export type AdminSessionUpdateInput = {
   sleepEndTime?: string;
   sleepStartTime?: string;
   status?: "revoked";
+  settingsAccessAllowed?: boolean;
   stepRewardBonusMinutes?: number;
   stepRewardEnabled?: boolean;
   stepRewardStepsRequired?: number;
@@ -1138,6 +1139,10 @@ export function validateAdminSessionUpdateInput(input: unknown) {
     return { ok: false as const, response: jsonError(400, "screenTimeEnabled must be a boolean when provided.") };
   }
 
+  if (payload.settingsAccessAllowed !== undefined && typeof payload.settingsAccessAllowed !== "boolean") {
+    return { ok: false as const, response: jsonError(400, "settingsAccessAllowed must be a boolean when provided.") };
+  }
+
   if (payload.alwaysAllowedPackage !== undefined && payload.alwaysAllowedPackage !== null) {
     const alwaysAllowedPackage = normalizeRequiredString(payload.alwaysAllowedPackage);
     if (
@@ -1301,6 +1306,7 @@ export function validateAdminSessionUpdateInput(input: unknown) {
       extendDays: payload.extendDays as number | undefined,
       forcedSleepEnabled: payload.forcedSleepEnabled as boolean | undefined,
       screenTimeEnabled: payload.screenTimeEnabled as boolean | undefined,
+      settingsAccessAllowed: payload.settingsAccessAllowed as boolean | undefined,
       sleepEndTime: normalizeOptionalString(payload.sleepEndTime) ?? undefined,
       sleepStartTime: normalizeOptionalString(payload.sleepStartTime) ?? undefined,
       stepRewardBonusMinutes: payload.stepRewardBonusMinutes as number | undefined,

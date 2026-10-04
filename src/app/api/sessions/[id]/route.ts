@@ -41,6 +41,7 @@ type SessionRow = {
   status: string;
   step_reward_bonus_minutes: number;
   step_reward_enabled: boolean;
+  settings_access_allowed: boolean;
   step_reward_steps_required: number;
   timezone: string | null;
   updated_at: string;
@@ -75,7 +76,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { data: session, error } = await retrySupabaseRead(() => supabase
     .from("sessions")
-    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at")
+    .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, settings_access_allowed")
     .eq("id", id)
     .maybeSingle<SessionRow>());
 
@@ -116,6 +117,7 @@ export async function GET(request: Request, context: RouteContext) {
     galleryAccessEnabled: session.gallery_access_enabled,
     pausedAt: session.paused_at,
     screenTimeEnabled: session.screen_time_enabled,
+    settingsAccessAllowed: session.settings_access_allowed,
     configVersion: session.config_version,
     sessionDays: session.session_days,
     sessionId: session.id,

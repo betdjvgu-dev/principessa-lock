@@ -62,6 +62,7 @@ type SessionRow = {
   request_id: string;
   session_days: number;
   screen_time_enabled: boolean;
+  settings_access_allowed: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -127,6 +128,7 @@ type RawSessionRow = {
   request_id: string;
   session_days: number;
   screen_time_enabled: boolean;
+  settings_access_allowed: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -226,7 +228,7 @@ export async function GET(request: Request) {
   const { data, error } = await readAllPages((from, to) => supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, dns_domain_query_counts, installed_apps), subs(label)",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, sub_id, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, paused_at, settings_access_allowed, devices(device_name, device_manufacturer, device_model, android_release, android_sdk_int, last_latitude, last_longitude, last_location_accuracy_m, last_location_at, recent_dns_queries, dns_domain_query_counts, installed_apps), subs(label)",
     )
     .order("updated_at", { ascending: false })
     .order("id")
@@ -269,6 +271,7 @@ export async function GET(request: Request) {
     request_id: session.request_id,
     session_days: session.session_days,
     screen_time_enabled: session.screen_time_enabled,
+    settings_access_allowed: session.settings_access_allowed,
     sleep_end_time: session.sleep_end_time,
     sleep_start_time: session.sleep_start_time,
     starts_at: session.starts_at,

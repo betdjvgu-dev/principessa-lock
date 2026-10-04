@@ -204,6 +204,13 @@ describe("validateAdminSessionUpdateInput", () => {
     expect(validateAdminSessionUpdateInput({ dailyLimitMinutes: 45 }).ok).toBe(true);
   });
 
+  it("accepts a settings access toggle and rejects a non-boolean", () => {
+    const allowed = validateAdminSessionUpdateInput({ settingsAccessAllowed: true });
+    expect(allowed.ok).toBe(true);
+    if (allowed.ok) expect(allowed.data.settingsAccessAllowed).toBe(true);
+    expect(validateAdminSessionUpdateInput({ settingsAccessAllowed: "yes" }).ok).toBe(false);
+  });
+
   it("rejects both endsAt and extendDays together", () => {
     const result = validateAdminSessionUpdateInput({
       endsAt: new Date().toISOString(),

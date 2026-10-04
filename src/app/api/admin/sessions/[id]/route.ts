@@ -41,6 +41,7 @@ type SessionRow = {
   request_id: string;
   session_days: number;
   screen_time_enabled: boolean;
+  settings_access_allowed: boolean;
   sleep_end_time: string;
   sleep_start_time: string;
   starts_at: string;
@@ -83,6 +84,7 @@ function formatSessionResponse(session: SessionRow) {
     status: session.status,
     step_reward_bonus_minutes: session.step_reward_bonus_minutes,
     step_reward_enabled: session.step_reward_enabled,
+    settings_access_allowed: session.settings_access_allowed,
     step_reward_steps_required: session.step_reward_steps_required,
     timezone: session.timezone,
     updated_at: session.updated_at,
@@ -98,6 +100,10 @@ function buildSessionUpdatePayload(session: SessionRow, input: AdminSessionUpdat
 
   if (input.screenTimeEnabled !== undefined && input.screenTimeEnabled !== session.screen_time_enabled) {
     updatePayload.screen_time_enabled = input.screenTimeEnabled;
+  }
+
+  if (input.settingsAccessAllowed !== undefined && input.settingsAccessAllowed !== session.settings_access_allowed) {
+    updatePayload.settings_access_allowed = input.settingsAccessAllowed;
   }
 
   if (input.alwaysAllowedPackage !== undefined && input.alwaysAllowedPackage !== session.always_allowed_package) {
@@ -198,7 +204,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { data: session, error: loadError } = await supabase
     .from("sessions")
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented, settings_access_allowed",
     )
     .eq("id", id)
     .maybeSingle<SessionRow>();
@@ -253,7 +259,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     .eq("updated_at", session.updated_at)
     .eq("status", session.status)
     .select(
-      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented",
+      "id, request_id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, blocked_packages, weekday_overrides, blocked_domains, content_filter_enabled, step_reward_enabled, step_reward_steps_required, step_reward_bonus_minutes, gallery_access_enabled, gallery_access_consented, settings_access_allowed",
     )
     .maybeSingle<SessionRow>();
 

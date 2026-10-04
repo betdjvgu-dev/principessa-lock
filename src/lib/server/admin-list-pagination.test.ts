@@ -1,16 +1,17 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-const { tables, reads, supabase, failures } = vi.hoisted(() => {
+const { tables, reads, supabase, failures, projections } = vi.hoisted(() => {
   const tables: Record<string, Record<string, unknown>[]> = {};
   const failures: Record<string, { code: string; message: string }[]> = {};
   const reads: string[] = [];
+  const projections: { table: string; columns: string }[] = [];
   const supabase = { rpc: vi.fn(async () => ({ data: 0, error: null })), from(table: string) {
     reads.push(table);
     let from = 0;
     let to = 199;
     const filters: ((row: Record<string, unknown>) => boolean)[] = [];
     const query = {
-      select() { return query; }, order() { return query; }, returns() { return query; },
+      select(columns: string) { projections.push({ table, columns }); return query; }, order() { return query; }, returns() { return query; },
       range(start: number, end: number) { from = start; to = end; return query; },
       eq(key: string, value: unknown) { filters.push((row) => row[key] === value); return query; },
       is(key: string, value: unknown) { return query.eq(key, value); },
@@ -24,7 +25,7 @@ const { tables, reads, supabase, failures } = vi.hoisted(() => {
     };
     return query;
   } };
-  return { tables, reads, supabase, failures };
+  return { tables, reads, supabase, failures, projections };
 });
 vi.mock("@/lib/server/rate-limit", () => ({ enforceAdminRateLimit: async () => null }));
 vi.mock("@/lib/server/admin-auth", () => ({ verifyAdminRequest: async () => ({ error: null }) }));
@@ -33,11 +34,35 @@ import { GET as sessions } from "@/app/api/admin/sessions/route";
 import { GET as subs } from "@/app/api/admin/subs/route";
 import { GET as requests } from "@/app/api/admin/session-requests/route";
 import { GET as unlocks } from "@/app/api/admin/unlock-requests/route";
+import { GET as deviceStatus } from "@/app/api/admin/device-status/route";
 
 beforeEach(() => {
   for (const key of Object.keys(tables)) delete tables[key];
   for (const key of Object.keys(failures)) delete failures[key];
   reads.length = 0;
+  projections.length = 0;
+});
+
+it("returns bounded process diagnostics alongside existing heartbeat fields", async () => {
+  tables.latest_device_heartbeats = [{ id: "h1", device_id: null, session_id: null, received_at: "2026-10-02T08:44:00Z",
+    used_minutes: 5, process_exit: { reasonCode: 4, occurredAt: "2026-10-02T08:40:00Z", trace: "private" },
+    protection_suspended: true }, { id: "h2", device_id: null, session_id: null, received_at: "2026-10-01T08:44:00Z",
+    process_exit: { reasonCode: "bad" }, protection_suspended: "bad" }];
+  const response = await deviceStatus(new Request("http://localhost/api/admin/device-status"));
+  const body = await response.json();
+  expect(response.status).toBe(200);
+  expect(body.devices[0]).toMatchObject({ usedMinutes: 5, protectionSuspended: true,
+    lastProcessExit: { reasonCode: 4, reason: "crash", occurredAt: "2026-10-02T08:40:00.000Z" } });
+  expect(body.devices[0].lastProcessExit).not.toHaveProperty("trace");
+  expect(body.devices[1].lastProcessExit).toBeNull();
+  expect(body.devices[1].protectionSuspended).toBeNull();
+  const selections = projections.filter((entry) => entry.table === "latest_device_heartbeats");
+  // Pagination probes a final empty page; each page must use one complete projection.
+  expect(selections).toHaveLength(reads.filter((table) => table === "latest_device_heartbeats").length);
+  expect(new Set(selections.map((entry) => entry.columns)).size).toBe(1);
+  expect(selections[0].columns).toContain("used_minutes");
+  expect(selections[0].columns).toContain("process_exit:payload->lastProcessExit");
+  expect(selections[0].columns.split(",").map((column) => column.trim())).not.toContain("payload");
 });
 
 it("recovers subs device details after a temporary database read failure", async () => {

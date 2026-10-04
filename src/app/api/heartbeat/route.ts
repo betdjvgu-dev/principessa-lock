@@ -6,7 +6,7 @@ import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { readJsonBody, validateHeartbeatInput, type HeartbeatInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
-import { mergeProtectionAlert, protectionAlertDue, protectionAlertReason } from "@/lib/server/protection-alert";
+import { mergeProtectionAlert, protectionAlertDue, protectionAlertReason, settingsAttemptNewlyReported } from "@/lib/server/protection-alert";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   // compared any further.
   const { data: previousHeartbeat } = await supabase
     .from("device_heartbeats")
-    .select("accessibility_granted, accessibility_running, overlay_permission_granted, device_admin_granted, usage_access_granted, protection_healthy")
+    .select("accessibility_granted, accessibility_running, overlay_permission_granted, device_admin_granted, usage_access_granted, protection_healthy, protection_broken_reasons")
     .eq("device_id", deviceAuth.device.id)
     .order("received_at", { ascending: false })
     .limit(1)
@@ -73,6 +73,7 @@ export async function POST(request: Request) {
       device_admin_granted: boolean | null;
       usage_access_granted: boolean | null;
       protection_healthy: boolean | null;
+      protection_broken_reasons: string[] | null;
     }>();
 
   const sessionOwnership = await verifySessionOwnershipForDevice({
@@ -208,6 +209,7 @@ export async function POST(request: Request) {
         usage_access_granted: heartbeat.usageAccessGranted,
         protection_healthy: onlySettingsTamper ? true : heartbeat.protectionHealthy,
       },
+      settingsAttemptNewlyReported(previousHeartbeat?.protection_broken_reasons, brokenReasons),
     );
     const { error: pendingError } = await supabase.from("devices")
       .update({ pending_protection_alert: pending }).eq("id", deviceAuth.device.id);
@@ -230,6 +232,7 @@ export async function POST(request: Request) {
         }
       }
     }
+
   } catch (error) {
     // Alert delivery is secondary: never turn a successfully stored heartbeat into a failure.
     console.error("Protection alert could not be processed.", error);

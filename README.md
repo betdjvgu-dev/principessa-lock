@@ -19,6 +19,7 @@ Copy `.env.example` to `.env.local` and fill in:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_ANON_KEY`
 - `ADMIN_EMAIL` (required; admin login, refresh and protected admin routes deny access when missing)
+- `SETTINGS_PIN` (optional; kept server-side, enables the authenticated session Settings approval endpoint)
 - `GITHUB_RELEASE_REPOSITORY` (public APK-only repository)
 - `GITHUB_RELEASE_TOKEN` (fine-grained token scoped to that repository)
 
@@ -26,6 +27,16 @@ Important:
 
 - `SUPABASE_SERVICE_ROLE_KEY` is server-only and must never be exposed to Android or Desktop client code.
 - Admin endpoints require a Supabase Auth access token.
+
+### October 4 update
+
+Before deploying this update on an existing database, apply
+`supabase/phase-settings-access-20261004.sql` if the `settings_access_allowed`
+column is missing. Do not re-run the full schema on an existing database.
+Settings approval increments the session config version and uses authenticated
+device ownership checks. Process-exit diagnostics use bounded fields from the
+existing heartbeat payload; they need no additional database columns.
+Failed/cooldown-delayed Settings alert pushes remain queued for a later heartbeat.
 
 ## Run locally
 

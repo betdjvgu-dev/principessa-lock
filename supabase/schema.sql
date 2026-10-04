@@ -396,6 +396,10 @@ alter table public.sessions
 alter table public.sessions
   add column if not exists paused_at timestamptz;
 
+-- Closed during a session until the keyholder turns it on, or the phone submits the settings PIN.
+alter table public.sessions
+  add column if not exists settings_access_allowed boolean not null default false;
+
 create table if not exists public.session_daily_usage (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,

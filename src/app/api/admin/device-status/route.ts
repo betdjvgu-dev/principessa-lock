@@ -4,6 +4,7 @@ import { enforceAdminRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { readAllPages, chunks } from "@/lib/server/read-pages";
+import { normalizeProcessExit } from "@/lib/server/process-exit-diagnostics";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -13,6 +14,8 @@ import { readAllPages, chunks } from "@/lib/server/read-pages";
 export const dynamic = "force-dynamic";
 
 type HeartbeatRow = {
+  process_exit?: unknown;
+  protection_suspended?: unknown;
   accessibility_granted: boolean | null;
   accessibility_running: boolean | null;
   active_session_present: boolean | null;
@@ -107,9 +110,10 @@ export async function GET(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await readAllPages((from, to) => supabase
     .from("latest_device_heartbeats")
-    .select(
+    .select([
       "id, device_id, session_id, sub_id, received_at, device_name, platform, timezone, app_version, session_status, protection_state, protection_healthy, protection_health_level, protection_health_status, protection_broken_reasons, service_running, foreground_service_running, active_session_present, accessibility_granted, accessibility_running, forced_sleep_enabled, forced_sleep_ready, inside_sleep_window, inside_persistence_penalty, persistence_penalty_until, usage_access_granted, device_admin_granted, blocking_required, blocking_active, blocking_method, overlay_permission_granted, overlay_ready, overlay_active, activity_recognition_granted, autostart_acknowledged, used_minutes, daily_limit_minutes, remaining_minutes, limit_reached, battery_optimization_ignored, last_accessibility_event_at, last_protection_tick_at, last_remote_action_check_at, last_recovery_attempt_at, last_recovery_reason, last_protection_check_at, last_session_sync_at, last_usage_refresh_at, local_date, network_connected, polling_interval_ms, polling_mode, remote_action_queue_length, root_detected, emulator_detected, debugger_attached",
-    )
+      "process_exit:payload->lastProcessExit, protection_suspended:payload->protectionSuspended",
+    ].join(","))
     .order("status_key", { ascending: true })
     .range(from, to)
     .returns<HeartbeatRow[]>());
@@ -216,6 +220,8 @@ export async function GET(request: Request) {
       lastRemoteActionCheckAt: row.last_remote_action_check_at,
       lastRecoveryAttemptAt: row.last_recovery_attempt_at,
       lastRecoveryReason: row.last_recovery_reason,
+      lastProcessExit: normalizeProcessExit(row.process_exit),
+      protectionSuspended: typeof row.protection_suspended === "boolean" ? row.protection_suspended : null,
       lastProtectionCheckAt: row.last_protection_check_at,
       lastSeenAt: row.received_at,
       lastSessionSyncAt: row.last_session_sync_at,
