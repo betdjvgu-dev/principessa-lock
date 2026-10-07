@@ -15,7 +15,9 @@ export async function GET(request: Request) {
   if(events.error) return transferError(events.error);
   const sources=await db.from("devices").select("id,sub_id,device_name,subs!inner(username,status)").is("access_revoked_at",null).eq("subs.status","active").order("created_at",{ascending:false}).limit(1000);
   if(sources.error) return transferError(sources.error);
-  return jsonOk({ok:true,transfers:(transfers.data??[]).map(t=>({...t,
+  const recoveries=await db.from("device_recovery_requests").select("id,device_id,sub_id,status,created_at,expires_at,decided_at,decided_by,devices(device_name),subs(username)").order("created_at",{ascending:false}).limit(100);
+  if(recoveries.error) return transferError(recoveries.error);
+  return jsonOk({ok:true,recoveries:recoveries.data??[],transfers:(transfers.data??[]).map(t=>({...t,
     status:['issued','pending'].includes(t.status)&&Date.parse(t.expires_at)<=Date.now()?'expired':t.status})),events:events.data??[],
     eligibleSources:(sources.data??[]).map(d=>({id:d.id,sub_id:d.sub_id,device_name:d.device_name,
       username:(Array.isArray(d.subs)?d.subs[0]:d.subs)?.username??null}))}, {headers:{"Cache-Control":"no-store"}});

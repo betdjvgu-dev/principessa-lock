@@ -97,7 +97,7 @@ export async function POST(request: Request) {
       // by replaying that public identity after the new device has been approved.
       if (!suppliedDeviceSecret ||
           hashDeviceSecret(suppliedDeviceSecret) !== existingDevice.device_secret_hash) {
-        return jsonError(403, "Device credential required. Contact Principessa to recover or transfer your access.", { recoveryRequired: true });
+        return jsonError(403, "This phone already has access, but its secure credential is missing. Use Recover existing access for Principessa's approval.", { recoveryRequired: true });
       }
       const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
 
