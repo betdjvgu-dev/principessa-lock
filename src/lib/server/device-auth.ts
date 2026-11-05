@@ -6,6 +6,7 @@ import { jsonError } from "@/lib/server/api-response";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseReadError } from "@/lib/server/supabase-errors";
 import { retrySupabaseRead } from "./retry-supabase-read";
+import { accessLicenseError, codeRegistrationEnabled, verifyAccessLicense } from "./access-licenses";
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 
@@ -108,9 +109,8 @@ export async function requireAuthenticatedDevice(
     };
   }
 
-  // Registration now requires keyholder approval (subs.status starts "invited") before the
-  // device can do anything functional -- everything except the registration-status check itself
-  // (which passes allowPendingSub) is locked out until the keyholder approves.
+  // Pending legacy registrations/transfers cannot use protected APIs. Code activation
+  // creates active access atomically; the lifetime entitlement is checked separately below.
   const subStatus = extractSubStatus(device.subs);
 
   if (!options?.allowPendingSub && subStatus !== null && subStatus !== "active") {
@@ -121,6 +121,14 @@ export async function requireAuthenticatedDevice(
           ? jsonError(403, "Registration is pending keyholder approval.")
           : jsonError(403, "Registration was not approved."),
     };
+  }
+
+  if (codeRegistrationEnabled() && (!device.sub_id || !subStatus)) {
+    return { ok: false, response: jsonError(503, "This device's access account needs admin review. Saved credentials have not been removed.") };
+  }
+  if (codeRegistrationEnabled() && subStatus === "active" && device.sub_id) {
+    try { await verifyAccessLicense(device.sub_id, device.id); }
+    catch (error) { return { ok: false, response: accessLicenseError(error) }; }
   }
 
   return {

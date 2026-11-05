@@ -30,6 +30,7 @@ export type ActivateInput = {
 };
 
 export type RegisterInput = {
+  activationCode?: string;
   deviceName: string;
   // Optional: required only for a genuinely new registration. If hardwareIdHash matches an
   // existing device (see /api/register), the existing username is reused and this is ignored.
@@ -438,6 +439,9 @@ export function validateRegisterInput(input: unknown) {
   }
 
   const payload = input as Record<string, unknown>;
+  if (payload.activationCode !== undefined && (typeof payload.activationCode !== "string" || payload.activationCode.length > 100)) {
+    return { ok: false as const, response: jsonError(400, "Invalid activation code.") };
+  }
   const deviceName = normalizeRequiredString(payload.deviceName);
   const usernameProvided = payload.username !== undefined;
   const username = normalizeRequiredString(payload.username);
@@ -490,6 +494,7 @@ export function validateRegisterInput(input: unknown) {
     data: {
       deviceName,
       username: username ?? undefined,
+      activationCode: payload.activationCode as string | undefined,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
       hardwareIdHash: normalizeRequiredString(payload.hardwareIdHash) ?? undefined,
       deviceSecret: deviceSecret ?? undefined,

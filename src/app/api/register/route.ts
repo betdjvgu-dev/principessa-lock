@@ -7,6 +7,7 @@ import { readJsonBody, validateRegisterInput, type RegisterInput } from "@/lib/s
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { transferError } from "@/lib/server/access-transfers";
+import { codeRegistrationEnabled, normalizeAccessCode, registerWithAccessCode } from "@/lib/server/access-licenses";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -75,6 +76,10 @@ export async function POST(request: Request) {
   } = validation.data;
   const supabase = getSupabaseAdminClient();
 
+  const activationCode = normalizeAccessCode(validation.data.activationCode);
+  if (validation.data.activationCode !== undefined && !activationCode) return jsonError(400, "Enter a valid activation code.");
+  if (activationCode && !codeRegistrationEnabled()) return jsonError(503, "Code activation is not available yet. Please retry after the backend update.");
+
   // Recover idempotent registration retries only with the original credential.
   // A known hardware identity is public metadata, not proof of paid-access ownership.
   if (hardwareIdHash) {
@@ -100,6 +105,10 @@ export async function POST(request: Request) {
         return jsonError(403, "This phone already has access, but its secure credential is missing. Use Recover existing access for Principessa's approval.", { recoveryRequired: true });
       }
       const deviceSecret = suppliedDeviceSecret ?? generateDeviceSecret();
+
+      if (existingSub?.status === "invited" && activationCode) {
+        return registerWithAccessCode(validation.data, activationCode);
+      }
 
       const { error: updateError } = await supabase
         .from("devices")
@@ -144,6 +153,11 @@ export async function POST(request: Request) {
 
   if (!username) {
     return jsonError(400, "username is required for a new registration.");
+  }
+
+  if (codeRegistrationEnabled()) {
+    if (!activationCode) return jsonError(400, "An activation code is required. Update the app to activate lifetime access.");
+    return registerWithAccessCode(validation.data, activationCode);
   }
 
   // No admin-issued code -- the sub picks a username directly, and both the username and the
