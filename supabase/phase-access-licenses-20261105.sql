@@ -14,7 +14,9 @@ create table if not exists public.lock_access_licenses (
   check ((source='legacy' and legacy_sub_id is not null) or (source='code' and activation_hash is not null and activation_hash ~ '^[a-f0-9]{64}$'))
 );
 alter table public.subs add column if not exists access_license_id uuid references public.lock_access_licenses(id);
-create table if not exists public.lock_legacy_access_candidates (sub_id uuid primary key references public.subs(id));
+-- Eligibility metadata belongs to the registration; rejecting a pending registration
+-- removes only its candidate row, not any actual license or transfer history.
+create table if not exists public.lock_legacy_access_candidates (sub_id uuid primary key references public.subs(id) on delete cascade);
 create table if not exists public.lock_license_migrations (name text primary key, applied_at timestamptz not null default now());
 -- Capture eligibility once, not every time the migration is reapplied. Pending users
 -- still require the original manual approval before any entitlement is created.

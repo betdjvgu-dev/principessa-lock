@@ -55,7 +55,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const deviceAuth = await requireAuthenticatedDevice(request, supabase);
+  const deviceAuth = await requireAuthenticatedDevice(request, supabase, { existingSessionRead: true });
 
   if (!deviceAuth.ok) {
     return deviceAuth.response;
@@ -71,7 +71,7 @@ export async function GET(request: Request, context: RouteContext) {
     return sessionOwnership.response;
   }
 
-  const timeoutError = await revokeTimedOutPauses(supabase, id);
+  const timeoutError = deviceAuth.accessRevoked ? null : await revokeTimedOutPauses(supabase, id);
   if (timeoutError) return timeoutError;
 
   const { data: session, error } = await retrySupabaseRead(() => supabase
@@ -89,7 +89,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const nowIso = new Date().toISOString();
-  const { data: unlocks, error: unlockError } = await retrySupabaseRead(() => supabase
+  const { data: unlocks, error: unlockError } = deviceAuth.accessRevoked ? { data: [], error: null } : await retrySupabaseRead(() => supabase
     .from("app_unlock_requests")
     .select("package_name")
     .eq("session_id", id)
@@ -124,7 +124,8 @@ export async function GET(request: Request, context: RouteContext) {
     sleepEndTime: session.sleep_end_time,
     sleepStartTime: session.sleep_start_time,
     startsAt: session.starts_at,
-    status: session.status,
+    status: deviceAuth.accessRevoked ? "revoked" : session.status,
+    accessRevoked: deviceAuth.accessRevoked === true,
     stepRewardBonusMinutes: session.step_reward_bonus_minutes,
     stepRewardEnabled: session.step_reward_enabled,
     stepRewardStepsRequired: session.step_reward_steps_required,

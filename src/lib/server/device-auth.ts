@@ -6,7 +6,7 @@ import { jsonError } from "@/lib/server/api-response";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseReadError } from "@/lib/server/supabase-errors";
 import { retrySupabaseRead } from "./retry-supabase-read";
-import { accessLicenseError, codeRegistrationEnabled, verifyAccessLicense } from "./access-licenses";
+import { AccessLicenseError, accessLicenseError, automaticAccessUsername, codeRegistrationEnabled, verifyAccessLicense } from "./access-licenses";
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
 
@@ -16,7 +16,7 @@ type DeviceAuthRow = {
   device_secret_hash: string | null;
   id: string;
   sub_id: string | null;
-  subs: { status: string } | { status: string }[] | null;
+  subs: { status: string; username?: string; label?: string } | { status: string; username?: string; label?: string }[] | null;
 };
 
 function extractSubStatus(value: DeviceAuthRow["subs"]) {
@@ -45,6 +45,7 @@ type DeviceAuthSuccess = {
     id: string;
     subId: string | null;
   };
+  accessRevoked?: boolean;
 };
 
 type DeviceAuthFailure = {
@@ -77,7 +78,7 @@ export function hashDeviceSecret(deviceSecret: string) {
 export async function requireAuthenticatedDevice(
   request: Request,
   suppliedSupabase?: SupabaseAdminClient,
-  options?: { allowPendingSub?: boolean },
+  options?: { allowPendingSub?: boolean; existingSessionRead?: boolean },
 ): Promise<DeviceAuthSuccess | DeviceAuthFailure> {
   const deviceSecret = extractBearerToken(request.headers.get("authorization"));
 
@@ -91,7 +92,7 @@ export async function requireAuthenticatedDevice(
   const supabase = suppliedSupabase ?? getSupabaseAdminClient();
   const { data: device, error } = await retrySupabaseRead(() => supabase
     .from("devices")
-    .select("id, device_name, device_secret_hash, sub_id, access_revoked_at, subs(status)")
+    .select("id, device_name, device_secret_hash, sub_id, access_revoked_at, subs(status,username,label)")
     .eq("device_secret_hash", hashDeviceSecret(deviceSecret))
     .maybeSingle<DeviceAuthRow>());
 
@@ -126,13 +127,26 @@ export async function requireAuthenticatedDevice(
   if (codeRegistrationEnabled() && (!device.sub_id || !subStatus)) {
     return { ok: false, response: jsonError(503, "This device's access account needs admin review. Saved credentials have not been removed.") };
   }
+  let accessRevoked = false;
   if (codeRegistrationEnabled() && subStatus === "active" && device.sub_id) {
-    try { await verifyAccessLicense(device.sub_id, device.id); }
-    catch (error) { return { ok: false, response: accessLicenseError(error) }; }
+    try { await verifyAccessLicense(device.sub_id, device.id, options?.existingSessionRead); }
+    catch (error) {
+      if (options?.existingSessionRead && error instanceof AccessLicenseError && error.reason === "revoked") accessRevoked = true;
+      else return { ok: false, response: accessLicenseError(error, device.id) };
+    }
+  }
+
+  const sub = Array.isArray(device.subs) ? device.subs[0] : device.subs;
+  if (!accessRevoked && sub?.username && sub.label === sub.username && [0, 1, 2].some(
+    attempt => automaticAccessUsername(device.device_name, deviceSecret, attempt) === sub.username,
+  )) {
+    // Display-only repair must never prevent an existing customer from authenticating.
+    await supabase.rpc("repair_lock_generated_label", { p_device: device.id, p_username: sub.username }).then(() => {}, () => {});
   }
 
   return {
     ok: true,
+    accessRevoked,
     device: {
       deviceName: device.device_name,
       id: device.id,

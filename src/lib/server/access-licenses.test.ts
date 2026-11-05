@@ -18,7 +18,7 @@ beforeEach(() => {
   m.fetch.mockResolvedValue(Response.json({ ok: true, licenseId, status: "active" }));
   m.rpc.mockResolvedValue({ data: { deviceId: "device", subId: "sub", username: "owner" }, error: null });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it("normalizes codes without accepting arbitrary input", async () => {
   const { normalizeAccessCode } = await import("./access-licenses");
   expect(normalizeAccessCode(" plck-1234-5678-abcd-efgh \n")).toBe(code);
@@ -43,6 +43,7 @@ it("code activation accepts just device name and code and creates a stable inter
   }) }));
   expect(response.status).toBe(201);
   expect(m.rpc.mock.calls[0][1].p_details.username).toBe(automaticAccessUsername(input.deviceName, secret));
+  expect(m.rpc.mock.calls[0][1].p_details.displayName).toBe(input.deviceName);
   expect(automaticAccessUsername(input.deviceName, secret)).toMatch(/^[a-z0-9_]{3,20}$/);
   expect(automaticAccessUsername("Telefon \u2764", secret)).toMatch(/^[a-z0-9_]{3,20}$/);
   expect(automaticAccessUsername("\u2764", secret)).toMatch(/^[a-z0-9_]{3,20}$/);
@@ -52,6 +53,7 @@ it("legacy clients retain their chosen username", async () => {
   const { registerWithAccessCode } = await import("./access-licenses");
   await registerWithAccessCode(input, code);
   expect(m.rpc.mock.calls[0][1].p_details.username).toBe("owner");
+  expect(m.rpc.mock.calls[0][1].p_details.displayName).toBe("owner");
 });
 it("an internal handle collision is retried without another claim or a user-visible username field", async () => {
   m.rpc.mockResolvedValueOnce({ data: null, error: { code: "23505", message: 'duplicate key violates constraint "subs_username_lower_key"' } });
@@ -96,30 +98,89 @@ it("code registration is gated; new registrations require a code once enabled", 
   expect((await POST(req(code))).status).toBe(503);
   expect(m.rpc).not.toHaveBeenCalled();
 });
-it("authenticated legacy checks deduplicate concurrent verification and cache successful checks", async () => {
-  m.q.maybeSingle.mockResolvedValueOnce({ data: { id: licenseId, current_device_id: "phone", current_sub_id: "sub", source: "legacy", legacy_sub_id: "sub", status: "active", revision: 0, last_validated_at: null }, error: null })
-    .mockResolvedValueOnce({ data: { id: licenseId }, error: null });
+function verificationLicense(overrides: Record<string, unknown> = {}) {
+  const license = { id: licenseId, current_device_id: "phone", current_sub_id: "sub", source: "legacy",
+    legacy_sub_id: "sub", status: "active", revision: 0, created_at: new Date().toISOString(), last_validated_at: null as string | null,
+    next_validation_attempt_at: null as string | null, ...overrides };
+  m.q.maybeSingle.mockResolvedValue({ data: license, error: null });
   m.q.single.mockResolvedValue({ data: { username: "owner", device_name: "Phone" }, error: null });
+  m.rpc.mockResolvedValue({ data: true, error: null });
+  return license;
+}
+it("authenticated checks deduplicate concurrent work and honor persisted successful verification", async () => {
+  const license = verificationLicense();
   const { verifyAccessLicense } = await import("./access-licenses");
   await Promise.all([verifyAccessLicense("sub", "phone"), verifyAccessLicense("sub", "phone")]);
+  license.last_validated_at = new Date().toISOString();
   await verifyAccessLicense("sub", "phone");
   expect(m.fetch).toHaveBeenCalledTimes(1);
 });
-it("a provider outage during verification cannot write revoked state", async () => {
-  m.q.maybeSingle.mockResolvedValue({ data: { id: licenseId, current_device_id: "phone", current_sub_id: "sub", status: "active", revision: 0 }, error: null });
-  m.q.single.mockResolvedValue({ data: { username: "owner", device_name: "Phone" }, error: null });
+it("checks Vault at 30 minutes, not 10, and still reads local revocation before the deadline", async () => {
+  vi.useFakeTimers();
+  const now = Date.now();
+  const license = verificationLicense({ last_validated_at: new Date(now).toISOString() });
+  const { verifyAccessLicense, LICENSE_CHECK_INTERVAL_MS } = await import("./access-licenses");
+  expect(LICENSE_CHECK_INTERVAL_MS).toBe(30 * 60_000);
+  vi.setSystemTime(now + 30 * 60_000 - 1);
+  await verifyAccessLicense("sub", "phone");
+  expect(m.fetch).not.toHaveBeenCalled();
+  expect(m.rpc).not.toHaveBeenCalled();
+  license.status = "revoked";
+  await expect(verifyAccessLicense("sub", "phone")).rejects.toMatchObject({ reason: "revoked" });
+  license.status = "active";
+  vi.setSystemTime(now + 30 * 60_000);
+  await verifyAccessLicense("sub", "phone");
+  expect(m.fetch).toHaveBeenCalledTimes(1);
+});
+it("a provider outage preserves existing access within grace and records backoff, not revocation", async () => {
+  const license = verificationLicense();
   m.fetch.mockRejectedValue(new Error("offline"));
   const { verifyAccessLicense } = await import("./access-licenses");
-  await expect(verifyAccessLicense("sub", "phone")).rejects.toThrow();
+  await expect(verifyAccessLicense("sub", "phone")).resolves.toBeUndefined();
+  expect(m.rpc).toHaveBeenCalledWith("fail_lock_license_check", expect.any(Object));
+  license.next_validation_attempt_at = new Date(Date.now() + 60_000).toISOString();
+  await verifyAccessLicense("sub", "phone");
+  await verifyAccessLicense("sub", "phone");
+  expect(m.fetch).toHaveBeenCalledTimes(1);
   expect(m.q.update).not.toHaveBeenCalled();
 });
-it("positive central revocation returns 403 and is saved without changing the device secret", async () => {
-  m.q.maybeSingle.mockResolvedValueOnce({ data: { id: licenseId, current_device_id: "phone", current_sub_id: "sub", status: "active", revision: 0 }, error: null })
-    .mockResolvedValueOnce({ data: { id: licenseId }, error: null });
-  m.q.single.mockResolvedValue({ data: { username: "owner", device_name: "Phone" }, error: null });
-  m.fetch.mockResolvedValue(Response.json({ ok: true, licenseId, status: "revoked" }));
+it("grace is bounded but reading an existing session remains possible for safe cleanup", async () => {
+  verificationLicense({ created_at: new Date(Date.now() - 48 * 60 * 60_000).toISOString(),
+    next_validation_attempt_at: new Date(Date.now() + 60_000).toISOString() });
   const { verifyAccessLicense } = await import("./access-licenses");
+  await expect(verifyAccessLicense("sub", "phone")).rejects.toMatchObject({ reason: "unavailable", status: 503 });
+  await expect(verifyAccessLicense("sub", "phone", true)).resolves.toBeUndefined();
+  expect(m.fetch).not.toHaveBeenCalled();
+});
+it("missing ownership or revoked licenses never receive outage grace", async () => {
+  verificationLicense({ status: "revoked" });
+  const { verifyAccessLicense } = await import("./access-licenses");
+  await expect(verifyAccessLicense("sub", "phone", true)).rejects.toMatchObject({ reason: "revoked" });
+  verificationLicense({ current_device_id: "other" });
+  await expect(verifyAccessLicense("sub", "phone")).rejects.toMatchObject({ reason: "revoked" });
+  expect(m.fetch).not.toHaveBeenCalled();
+});
+it("invalid central license responses are not silently treated as an outage", async () => {
+  verificationLicense();
+  m.fetch.mockResolvedValue(Response.json({ error: "invalid_license" }, { status: 409 }));
+  const { verifyAccessLicense } = await import("./access-licenses");
+  await expect(verifyAccessLicense("sub", "phone")).rejects.toMatchObject({ reason: "invalid_license" });
+  expect(m.rpc.mock.calls.some(c => c[0] === "finish_lock_license_check")).toBe(false);
+});
+it("a worker with an unclaimed lease does not send duplicate verification", async () => {
+  verificationLicense();
+  m.rpc.mockResolvedValue({ data: false, error: null });
+  const { verifyAccessLicense } = await import("./access-licenses");
+  await verifyAccessLicense("sub", "phone");
+  expect(m.fetch).not.toHaveBeenCalled();
+});
+it("positive central revocation returns 403 and is saved without changing the device secret", async () => {
+  verificationLicense();
+  m.fetch.mockResolvedValue(Response.json({ ok: true, licenseId, status: "revoked" }));
+  const { verifyAccessLicense, accessLicenseError, AccessLicenseError } = await import("./access-licenses");
   await expect(verifyAccessLicense("sub", "phone")).rejects.toMatchObject({ status: 403, reason: "revoked" });
-  expect(m.q.update).toHaveBeenCalledWith(expect.objectContaining({ status: "revoked" }));
-  expect(JSON.stringify(m.q.update.mock.calls)).not.toContain("device_secret");
+  expect(m.rpc).toHaveBeenCalledWith("finish_lock_license_check", expect.objectContaining({ p_status: "revoked" }));
+  expect(JSON.stringify(m.rpc.mock.calls)).not.toContain("device_secret");
+  const response = accessLicenseError(new AccessLicenseError("revoked", 403), "phone");
+  expect((await response.json()).details).toEqual({ code: "ACCESS_LICENSE_REVOKED", deviceId: "phone" });
 });
