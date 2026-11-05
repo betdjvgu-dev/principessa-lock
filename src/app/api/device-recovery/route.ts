@@ -14,12 +14,30 @@ export async function POST(request: Request) {
   if (!body.ok) return body.response;
   const input = validateRegisterInput(body.data);
   if (!input.ok) return input.response;
-  const { username, hardwareIdHash, deviceSecret } = input.data;
-  if (!username || !deviceSecret || !/^[0-9a-f]{64}$/.test(hardwareIdHash ?? "")) {
-    return jsonError(400, "Original username, device identity and a secure credential are required.");
+  const { username, deviceName, hardwareIdHash, deviceSecret } = input.data;
+  if (!deviceSecret || !/^[0-9a-f]{64}$/.test(hardwareIdHash ?? "")) {
+    return jsonError(400, "Original device details, device identity and a secure credential are required.");
   }
-  const { data, error } = await getSupabaseAdminClient().rpc("request_device_recovery", {
-    p_hardware: hardwareIdHash, p_username: username, p_secret_hash: hashDeviceSecret(deviceSecret),
+  const db = getSupabaseAdminClient();
+  let recoveryUsername = username;
+  if (!recoveryUsername) {
+    type Sub = { username: string | null; status: string };
+    const { data: device, error: lookupError } = await db.from("devices")
+      .select("device_name,access_revoked_at,subs(username,status)")
+      .eq("hardware_id_hash", hardwareIdHash!)
+      .maybeSingle<{ device_name: string; access_revoked_at: string | null; subs: Sub | Sub[] | null }>();
+    if (lookupError) return recoveryError({});
+    const sub = Array.isArray(device?.subs) ? device.subs[0] : device?.subs;
+    if (!device || device.access_revoked_at || sub?.status !== "active" || !sub.username ||
+        device.device_name.trim().toLowerCase() !== deviceName.trim().toLowerCase()) {
+      return recoveryError({ message: "recovery_unavailable" });
+    }
+    // Resolve the internal handle server-side, but STILL require the existing SQL
+    // admin approval and exact candidate-secret check before returning any identity.
+    recoveryUsername = sub.username;
+  }
+  const { data, error } = await db.rpc("request_device_recovery", {
+    p_hardware: hardwareIdHash, p_username: recoveryUsername, p_secret_hash: hashDeviceSecret(deviceSecret),
   });
   if (error) return recoveryError(error);
   if (data?.status === "pending") return jsonError(409,

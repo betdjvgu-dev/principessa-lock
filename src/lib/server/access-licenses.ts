@@ -14,24 +14,38 @@ export function normalizeAccessCode(value: unknown): string | null {
 export class AccessLicenseError extends Error {
   constructor(public readonly reason: string, public readonly status = 503) { super(reason); }
 }
+export function automaticAccessUsername(deviceName: string, deviceSecret: string, attempt = 0) {
+  const prefix = deviceName.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 7) || "device";
+  // Internal account handle only, never an authentication credential. Stable across retries.
+  const suffix = createHash("sha256").update(`lock-username:v1\0${deviceSecret}\0${attempt}`).digest("hex").slice(0, 12);
+  return `${prefix}_${suffix}`;
+}
 export async function registerWithAccessCode(input: RegisterInput, code: string) {
-  if (!input.deviceSecret || !input.username) return jsonError(400, "Update the app and provide a username and activation code.");
+  if (!input.deviceSecret) return jsonError(400, "Update the app and provide a secure device credential and activation code.");
   try {
     const hash = createHash("sha256").update(input.deviceSecret).digest("hex");
     const receipt = await exchangeAccessLicense({ action: "claim", code, credentialHash: hash });
     if (receipt.status !== "active") throw new AccessLicenseError("revoked", 403);
-    const { data, error } = await getSupabaseAdminClient().rpc("activate_lock_access_license", {
-      p_license: receipt.licenseId, p_hash: hash,
-      p_details: { ...input, deviceSecret: undefined, activationCode: undefined },
-    });
-    if (error) {
-      if (error.code === "23505") return jsonError(409, "Username or device name is already in use. Change it and retry with the same code.");
-      if (["license_bound_elsewhere", "license_existing_device"].includes(error.message)) throw new AccessLicenseError("bound_elsewhere", 409);
-      throw new AccessLicenseError("unavailable");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const username = input.username ?? automaticAccessUsername(input.deviceName, input.deviceSecret, attempt);
+      const { data, error } = await getSupabaseAdminClient().rpc("activate_lock_access_license", {
+        p_license: receipt.licenseId, p_hash: hash,
+        p_details: { ...input, username, deviceSecret: undefined, activationCode: undefined },
+      });
+      if (error) {
+        if (error.code === "23505" && !input.username && /username/i.test(error.message)) continue;
+        if (error.code === "23505") return jsonError(409, input.username
+          ? "Username or device name is already in use. Change it and retry with the same code."
+          : "That device name is already in use. Choose another and retry with the same code.");
+        if (["license_bound_elsewhere", "license_existing_device"].includes(error.message)) throw new AccessLicenseError("bound_elsewhere", 409);
+        throw new AccessLicenseError("unavailable");
+      }
+      if (!data?.deviceId || !data?.subId) throw new AccessLicenseError("unavailable");
+      return jsonOk({ ok: true, status: "active", subId: data.subId, username: data.username,
+        device: { id: data.deviceId, deviceSecret: input.deviceSecret } }, { status: 201, headers: { "Cache-Control": "no-store" } });
     }
-    if (!data?.deviceId || !data?.subId) throw new AccessLicenseError("unavailable");
-    return jsonOk({ ok: true, status: "active", subId: data.subId, username: data.username,
-      device: { id: data.deviceId, deviceSecret: input.deviceSecret } }, { status: 201, headers: { "Cache-Control": "no-store" } });
+    throw new AccessLicenseError("unavailable");
   } catch (error) { return accessLicenseError(error); }
 }
 export function accessLicenseError(error: unknown) {

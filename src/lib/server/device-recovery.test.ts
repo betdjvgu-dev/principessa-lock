@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ rpc: vi.fn(), admin: vi.fn(), limit: vi.fn() }));
-vi.mock("@/lib/server/supabase-admin", () => ({ getSupabaseAdminClient: () => ({ rpc: m.rpc }) }));
+const m = vi.hoisted(() => ({ rpc: vi.fn(), admin: vi.fn(), limit: vi.fn(), q: { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() } }));
+vi.mock("@/lib/server/supabase-admin", () => ({ getSupabaseAdminClient: () => ({ rpc: m.rpc, from: () => m.q }) }));
 vi.mock("@/lib/server/admin-auth", () => ({ verifyAdminRequest: m.admin }));
 vi.mock("@/lib/server/rate-limit", () => ({ enforceRateLimit: m.limit, enforceAdminRateLimit: m.limit }));
 import { POST } from "@/app/api/device-recovery/route";
@@ -10,7 +10,11 @@ const secret = "plock_" + "a".repeat(43);
 const body = { deviceName: "Phone", username: "owner", deviceSecret: secret, hardwareIdHash: "b".repeat(64) };
 const req = (value: unknown = body) => new Request("http://localhost/api/device-recovery", { method: "POST", body: JSON.stringify(value) });
 const id = "20000000-0000-4000-8000-000000000001";
-beforeEach(() => { vi.resetAllMocks(); m.limit.mockResolvedValue(null); m.admin.mockResolvedValue({ identity: { id: "admin" } }); });
+beforeEach(() => {
+  vi.resetAllMocks(); m.limit.mockResolvedValue(null); m.admin.mockResolvedValue({ identity: { id: "admin" } });
+  m.q.select.mockReturnValue(m.q); m.q.eq.mockReturnValue(m.q);
+  m.q.maybeSingle.mockResolvedValue({ data: { device_name: "Phone", access_revoked_at: null, subs: { username: "internal_123", status: "active" } }, error: null });
+});
 it("pending requests reveal no identity or credential and SQL receives only hashes", async () => {
   m.rpc.mockResolvedValue({ data: { status: "pending" } });
   const res = await POST(req()); expect(res.status).toBe(409);
@@ -22,8 +26,32 @@ it("only approved candidate receives its own secret, never a database secret", a
   const res = await POST(req()); expect(res.status).toBe(200); expect(res.headers.get("cache-control")).toBe("no-store");
   expect((await res.json()).device).toEqual({ id, deviceSecret: secret });
 });
-it.each([{}, { ...body, deviceSecret: undefined }, { ...body, hardwareIdHash: "bad" }, { ...body, username: undefined }])("malformed requests never reach SQL", async value => {
+it.each([{}, { ...body, deviceSecret: undefined }, { ...body, hardwareIdHash: "bad" }, { ...body, deviceName: "" }])("malformed requests never reach SQL", async value => {
   expect((await POST(req(value))).status).toBe(400); expect(m.rpc).not.toHaveBeenCalled();
+});
+it("device-name recovery resolves the handle privately and still waits for admin approval", async () => {
+  m.rpc.mockResolvedValue({ data: { status: "pending" } });
+  const response = await POST(req({ ...body, username: undefined, deviceName: " phone " }));
+  expect(response.status).toBe(409);
+  expect(m.q.eq).toHaveBeenCalledWith("hardware_id_hash", body.hardwareIdHash);
+  expect(m.rpc).toHaveBeenCalledWith("request_device_recovery", expect.objectContaining({ p_username: "internal_123" }));
+  const text = await response.text();
+  expect(text).not.toContain("internal_123"); expect(text).not.toContain(secret);
+});
+it.each([null,
+  { device_name: "Different phone", subs: { username: "internal", status: "active" } },
+  { device_name: "Phone", access_revoked_at: "2026-11-01", subs: { username: "internal", status: "active" } },
+  { device_name: "Phone", subs: { username: "internal", status: "archived" } },
+  { device_name: "Phone", subs: { username: "internal", status: "invited" } },
+])("wrong name, missing identity, pending or revoked account cannot request recovery", async device => {
+  m.q.maybeSingle.mockResolvedValue({ data: device, error: null });
+  expect((await POST(req({ ...body, username: undefined }))).status).toBe(403);
+  expect(m.rpc).not.toHaveBeenCalled();
+});
+it("metadata lookup outages fail temporarily and never approve recovery", async () => {
+  m.q.maybeSingle.mockResolvedValue({ data: null, error: { message: "offline" } });
+  expect((await POST(req({ ...body, username: undefined }))).status).toBe(503);
+  expect(m.rpc).not.toHaveBeenCalled();
 });
 it("rate limiting runs before recovery work", async () => {
   m.limit.mockResolvedValue(new Response(null, { status: 429 })); expect((await POST(req())).status).toBe(429); expect(m.rpc).not.toHaveBeenCalled();

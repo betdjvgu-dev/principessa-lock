@@ -151,13 +151,13 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!username) {
-    return jsonError(400, "username is required for a new registration.");
-  }
-
   if (codeRegistrationEnabled()) {
     if (!activationCode) return jsonError(400, "An activation code is required. Update the app to activate lifetime access.");
     return registerWithAccessCode(validation.data, activationCode);
+  }
+
+  if (!username) {
+    return jsonError(400, "Update the backend to activate access without a username.");
   }
 
   // No admin-issued code -- the sub picks a username directly, and both the username and the
