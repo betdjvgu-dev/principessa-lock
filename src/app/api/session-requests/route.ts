@@ -47,7 +47,14 @@ function buildInsertPayload(
     forced_sleep_enabled: input.forcedSleepEnabled,
     full_discretion: input.fullDiscretion,
     gallery_access_enabled: input.galleryAccessEnabled,
-    gallery_access_consented: input.galleryAccessEnabled,
+    // "Leave it up to Principessa" hands every term -- gallery access included -- to the
+    // keyholder, and the device already forces the gallery OS permission at activation for a
+    // full-discretion request (SessionRequestViewModel: requiresGalleryAccess = ... || fullDiscretion),
+    // so the sub has effectively consented by choosing it. Without treating full discretion as
+    // consent here, the keyholder's Gallery Access toggle on a discretionary request could never
+    // be enabled -- approve route rejects it with "not consented" -- even though the sub granted
+    // the photo permission on-device.
+    gallery_access_consented: input.galleryAccessEnabled || input.fullDiscretion,
     requested_days: input.sessionDays,
     screen_time_enabled: input.screenTimeEnabled,
     sub_id: subId,
