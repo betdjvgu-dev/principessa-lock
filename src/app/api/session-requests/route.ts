@@ -7,6 +7,7 @@ import { validateSessionRequestInput, readJsonBody, type SessionRequestInput } f
 import { shouldAutoApproveSessionRequest } from "@/lib/server/session-pricing";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { ownSessionRequest, type OwnSessionRequestRow } from "@/lib/server/own-session-request";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -16,11 +17,6 @@ import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 export const dynamic = "force-dynamic";
 
 type CreateSessionRequestRow = {
-  id: string;
-  status: string;
-};
-
-type OwnRequestStatusRow = {
   id: string;
   status: string;
 };
@@ -104,6 +100,15 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
+
+  // A lapsed approval must not permanently prevent a recovered device from requesting again.
+  // The status/deadline predicates preserve activations and concurrent approval renewals.
+  const { error: expiryError } = await supabase.from("session_requests")
+    .update({ status: "expired" })
+    .eq("device_id", deviceAuth.device.id)
+    .eq("status", "approved")
+    .lte("activation_code_expires_at", new Date().toISOString());
+  if (expiryError) return jsonSupabaseError("Failed to check session approval expiry.", expiryError);
 
   // Without this, a sub could submit a second request while an earlier one was still
   // pending/approved-but-not-yet-activated -- confirmed happening during testing, and it left
@@ -194,11 +199,12 @@ export async function GET(request: Request) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("session_requests")
-    .select("id, status")
+    .select("id, status, device_name, requested_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, full_discretion, activation_code_expires_at")
     .eq("device_id", deviceAuth.device.id)
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(1)
-    .maybeSingle<OwnRequestStatusRow>();
+    .maybeSingle<OwnSessionRequestRow>();
 
   if (error) {
     return jsonSupabaseError("Failed to load session request status.", error);
@@ -206,6 +212,6 @@ export async function GET(request: Request) {
 
   return jsonOk({
     ok: true,
-    request: data ? { id: data.id, status: data.status } : null,
+    request: data ? ownSessionRequest(data) : null,
   });
 }
