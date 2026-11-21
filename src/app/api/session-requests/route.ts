@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     .update({ status: "expired" })
     .eq("device_id", deviceAuth.device.id)
     .eq("status", "approved")
-    .lte("activation_code_expires_at", new Date().toISOString());
+    .or(`activation_code_expires_at.is.null,activation_code_expires_at.lte.${new Date().toISOString()}`);
   if (expiryError) return jsonSupabaseError("Failed to check session approval expiry.", expiryError);
 
   // Without this, a sub could submit a second request while an earlier one was still
@@ -197,14 +197,20 @@ export async function GET(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const lookup = () => supabase
     .from("session_requests")
     .select("id, status, device_name, requested_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, full_discretion, activation_code_expires_at")
-    .eq("device_id", deviceAuth.device.id)
+    .eq("device_id", deviceAuth.device.id);
+  const newest = (query: ReturnType<typeof lookup>) => query
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(1)
     .maybeSingle<OwnSessionRequestRow>();
+  // Prefer the same actionable requests that prevent submission; history is only a fallback.
+  let { data, error } = await newest(lookup().or(
+    `status.eq.pending,and(status.eq.approved,activation_code_expires_at.gt.${new Date().toISOString()})`
+  ));
+  if (!error && !data) ({ data, error } = await newest(lookup()));
 
   if (error) {
     return jsonSupabaseError("Failed to load session request status.", error);

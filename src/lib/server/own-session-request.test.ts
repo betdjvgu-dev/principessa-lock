@@ -10,7 +10,7 @@ vi.mock("@/lib/server/supabase-admin", () => ({ getSupabaseAdminClient: () => ({
   const calls: unknown[][] = [["from", table]];
   m.queries.push(calls);
   const query: Record<string, unknown> = {};
-  for (const name of ["select", "update", "insert", "eq", "in", "lte", "order", "limit", "maybeSingle", "single"]) {
+  for (const name of ["select", "update", "insert", "eq", "in", "or", "order", "limit", "maybeSingle", "single"]) {
     query[name] = (...args: unknown[]) => { calls.push([name, ...args]); return query; };
   }
   query.then = (resolve: (result: unknown) => void) => Promise.resolve(m.results.shift()).then(resolve);
@@ -49,6 +49,13 @@ it("missing device authentication cannot discover or mutate requests", async () 
   expect((await GET(new Request("https://test/api/session-requests"))).status).toBe(401);
   expect(m.queries).toEqual([]);
 });
+it("looks for actionable requests before terminal history and does not write on discovery", async () => {
+  m.results.push({ data: null }, { data: { ...row, status: "cancelled" } });
+  const body = await (await GET(new Request("https://test/api/session-requests"))).json();
+  expect(body.request.status).toBe("cancelled");
+  expect(m.queries[0]).toContainEqual(["or", expect.stringContaining("status.eq.pending,and(status.eq.approved,activation_code_expires_at.gt.")]);
+  expect(m.queries[1]).toContainEqual(["eq","device_id","device-a"]);
+});
 const post = () => POST(new Request("https://test/api/session-requests", { method: "POST", body: JSON.stringify({
   deviceName: "Phone", sessionDays: 3, dailyLimitMinutes: 90, forcedSleepEnabled: false, fullDiscretion: true,
   galleryAccessEnabled: false, screenTimeEnabled: true,
@@ -58,7 +65,7 @@ it("expires only elapsed approved rows for this device before accepting a new re
   expect((await post()).status).toBe(201);
   expect(m.queries[0]).toEqual([
     ["from", "session_requests"], ["update", { status: "expired" }], ["eq", "device_id", "device-a"],
-    ["eq", "status", "approved"], ["lte", "activation_code_expires_at", expect.any(String)],
+    ["eq", "status", "approved"], ["or", expect.stringMatching(/^activation_code_expires_at\.is\.null,activation_code_expires_at\.lte\./)],
   ]);
   expect(m.queries[2]).toContainEqual(["insert", expect.objectContaining({ device_id: "device-a", requested_days: 3 })]);
 });

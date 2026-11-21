@@ -9,5 +9,6 @@ export function recoveryError(error: { message?: string }) {
     recovery_not_pending: [409, "This recovery request expired or was already decided. Refresh the list."],
   };
   const known = messages[error.message ?? ""];
-  return jsonError(known?.[0] ?? 503, known?.[1] ?? "Access recovery is temporarily unavailable. Please retry later.");
+  return jsonError(known?.[0] ?? 503, known?.[1] ?? "Access recovery is temporarily unavailable. Please retry later.",
+    error.message === "recovery_rejected" ? { code: "RECOVERY_REJECTED" } : undefined);
 }

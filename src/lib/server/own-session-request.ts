@@ -13,8 +13,7 @@ export type OwnSessionRequestRow = {
 };
 
 export function ownSessionRequest(row: OwnSessionRequestRow, now = Date.now()) {
-  const expired = row.status === "approved" && row.activation_code_expires_at !== null &&
-    Date.parse(row.activation_code_expires_at) <= now;
+  const expired = row.status === "approved" && !(Date.parse(row.activation_code_expires_at ?? "") > now);
   return {
     id: row.id,
     status: expired ? "expired" : row.status,

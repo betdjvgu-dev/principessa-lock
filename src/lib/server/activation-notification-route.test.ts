@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({ single: vi.fn(), rpc: vi.fn(), notify: vi.fn(), query: {} as Record<string, unknown> }));
 vi.mock("./rate-limit", () => ({ enforceRateLimit: async () => null }));
 vi.mock("./device-auth", () => ({ requireAuthenticatedDevice: async () => ({ ok: true, device: { id: "device", deviceName: "Phone" } }) }));
@@ -10,12 +10,15 @@ const session = { id: "session", device_id: "device", status: "active", session_
   starts_at: "2026-09-28T00:00:00Z", ends_at: "2026-10-01T00:00:00Z", activated_at: "2026-09-28T00:00:00Z", updated_at: "2026-09-28T00:00:00Z" };
 const approved = { id: "request", activation_code_expires_at: "2099-01-01T00:00:00Z", requested_days: 3, daily_limit_minutes: 90 };
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-29T00:00:00Z"));
   vi.resetAllMocks();
   for (const method of ['select','eq','order','limit','update','insert']) m.query[method] = () => m.query;
   m.query.maybeSingle = m.single; m.query.error = null;
   m.notify.mockResolvedValue(false);
   m.rpc.mockResolvedValue({ data: { created: true, session }, error: null });
 });
+afterEach(() => vi.useRealTimers());
 const run = () => POST(new Request('http://localhost/api/activate', { method: 'POST' }));
 it('notifies only after a new session exists; failed delivery does not break activation', async () => {
   m.single.mockResolvedValueOnce({ data: approved }).mockResolvedValueOnce({ data: null }).mockResolvedValueOnce({ data: session });

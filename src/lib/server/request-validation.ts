@@ -20,6 +20,7 @@ export type ApproveSessionRequestInput = {
 };
 
 export type ActivateInput = {
+  requestId?: string;
   timezone?: string;
   // Best-effort, client-reported reason the device's *previous* local session disappeared (see
   // SessionClearReasonSupport.kt) -- surfaced to the keyholder so she doesn't have to rely on the
@@ -745,6 +746,9 @@ export function validateActivateInput(input: unknown) {
   }
 
   const payload = (input ?? {}) as Record<string, unknown>;
+  if (payload.requestId !== undefined && !validRequestId(payload.requestId)) {
+    return { ok: false as const, response: jsonError(400, "Invalid request id.") };
+  }
 
   if (payload.timezone !== undefined && normalizeRequiredString(payload.timezone) === null) {
     return { ok: false as const, response: jsonError(400, "timezone must be a non-empty string when provided.") };
@@ -753,11 +757,16 @@ export function validateActivateInput(input: unknown) {
   return {
     ok: true as const,
     data: {
+      requestId: payload.requestId as string | undefined,
       lastSessionClearAt: normalizeOptionalString(payload.lastSessionClearAt) ?? undefined,
       lastSessionClearReason: normalizeOptionalString(payload.lastSessionClearReason) ?? undefined,
       timezone: normalizeRequiredString(payload.timezone) ?? undefined,
     } satisfies ActivateInput,
   };
+}
+
+export function validRequestId(id: unknown): id is string {
+  return typeof id === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 }
 
 function normalizeOptionalString(value: unknown) {

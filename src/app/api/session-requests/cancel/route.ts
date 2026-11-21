@@ -3,6 +3,7 @@ import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
+import { validRequestId } from "@/lib/server/request-validation";
 
 // Every route here talks to Supabase via fetch() under the hood, which Next.js's Route
 // Handler caching can silently memoize even though these are always meant to be live reads
@@ -41,11 +42,15 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdminClient();
-  const { data: cancelled, error } = await supabase
+  const requestId = new URL(request.url).searchParams.get("requestId");
+  if (requestId !== null && !validRequestId(requestId)) return jsonError(400, "Invalid request id.");
+  let mutation = supabase
     .from("session_requests")
     .update({ status: "cancelled" })
     .eq("device_id", deviceAuth.device.id)
-    .eq("status", "approved")
+    .eq("status", "approved");
+  if (requestId !== null) mutation = mutation.eq("id", requestId);
+  const { data: cancelled, error } = await mutation
     .select("id, status")
     .maybeSingle<CancelledRequestRow>();
 

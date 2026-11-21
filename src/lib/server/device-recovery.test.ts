@@ -53,6 +53,13 @@ it("metadata lookup outages fail temporarily and never approve recovery", async 
   expect((await POST(req({ ...body, username: undefined }))).status).toBe(503);
   expect(m.rpc).not.toHaveBeenCalled();
 });
+it("only a definitive rejection tells the client to discard its pending candidate", async () => {
+  for (const message of ["recovery_pending", "recovery_unavailable", "recovery_rejected"]) {
+    m.rpc.mockResolvedValue({ error: { message } });
+    const body = await (await POST(req())).json();
+    expect(body.details?.code).toBe(message === "recovery_rejected" ? "RECOVERY_REJECTED" : undefined);
+  }
+});
 it("rate limiting runs before recovery work", async () => {
   m.limit.mockResolvedValue(new Response(null, { status: 429 })); expect((await POST(req())).status).toBe(429); expect(m.rpc).not.toHaveBeenCalled();
 });

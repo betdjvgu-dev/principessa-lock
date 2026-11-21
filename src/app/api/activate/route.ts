@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/server/api-response";
 import { requireAuthenticatedDevice } from "@/lib/server/device-auth";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
-import { readJsonBody, validateActivateInput, type ActivateInput } from "@/lib/server/request-validation";
+import { readJsonBody, validRequestId, validateActivateInput, type ActivateInput } from "@/lib/server/request-validation";
 import { getSupabaseAdminClient } from "@/lib/server/supabase-admin";
 import { jsonSupabaseError } from "@/lib/server/supabase-errors";
 import { type SessionRequestRow } from "@/lib/server/session-flow";
@@ -70,7 +70,31 @@ function normalizeTimestamp(value: string) {
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
 }
 
+function restorable(row: Pick<SessionRow, "status" | "ends_at" | "paused_at">) {
+  return row.status === "active" && (row.paused_at == null
+    ? Date.parse(row.ends_at) > Date.now()
+    : Date.parse(row.paused_at) + 86400000 > Date.now());
+}
+
+// Resolve only the session created from this request. The caller then reads its full config.
+export async function GET(request: Request) {
+  const limited = await enforceRateLimit({ request, routeKey: "activation:restore", limit: 60,
+    windowMs: 900000, errorMessage: "Too many restore attempts." });
+  if (limited) return limited;
+  const auth = await requireAuthenticatedDevice(request);
+  if (!auth.ok) return auth.response;
+  const id = new URL(request.url).searchParams.get("requestId");
+  if (!validRequestId(id)) return jsonError(400, "Invalid request id.");
+  const { data, error } = await getSupabaseAdminClient().from("sessions")
+    .select("id,status,ends_at,paused_at").eq("device_id", auth.device.id).eq("request_id", id)
+    .maybeSingle();
+  if (error) return jsonSupabaseError("Failed to find existing session.", error);
+  if (!data || !restorable(data)) return jsonError(410, "There is no live session for this request.");
+  return jsonOk({ ok: true, sessionId: data.id });
+}
+
 function sessionResponse(deviceId: string, session: SessionRow) {
+  if (!restorable(session)) return jsonError(410, "This session has ended.");
   const startsAt = normalizeTimestamp(session.starts_at);
   const endsAt = normalizeTimestamp(session.ends_at);
   const updatedAt = normalizeTimestamp(session.updated_at);
@@ -143,11 +167,13 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdminClient();
   await applyDeviceUpdateFromActivateInput(supabase, deviceAuth.device.id, validation.data);
 
-  const { data: sessionRequest, error: loadError } = await supabase
+  let approvals = supabase
     .from("session_requests")
     .select("*")
     .eq("device_id", deviceAuth.device.id)
-    .eq("status", "approved")
+    .eq("status", "approved");
+  if (validation.data.requestId) approvals = approvals.eq("id", validation.data.requestId);
+  const { data: sessionRequest, error: loadError } = await approvals
     .order("approved_at", { ascending: false })
     .limit(1)
     .maybeSingle<SessionRequestRow>();
@@ -163,11 +189,13 @@ export async function POST(request: Request) {
     // mid-request, etc.), so the device retried and now finds nothing "approved" left. Rather
     // than erroring a device that's actually already active, hand back its existing active
     // session so a retry is self-healing instead of stranding the sub on an error screen forever.
-    const { data: existingSession, error: existingSessionError } = await supabase
+    let existing = supabase
       .from("sessions")
       .select("id, device_id, session_days, daily_limit_minutes, screen_time_enabled, always_allowed_package, forced_sleep_enabled, gallery_access_enabled, sleep_start_time, sleep_end_time, timezone, starts_at, ends_at, status, config_version, activated_at, updated_at, paused_at")
       .eq("device_id", deviceAuth.device.id)
-      .eq("status", "active")
+      .eq("status", "active");
+    if (validation.data.requestId) existing = existing.eq("request_id", validation.data.requestId);
+    const { data: existingSession, error: existingSessionError } = await existing
       .order("activated_at", { ascending: false })
       .limit(1)
       .maybeSingle<SessionRow>();
@@ -229,7 +257,7 @@ export async function POST(request: Request) {
   }
 
   if (!sessionRequest.activation_code_expires_at) {
-    return jsonError(500, "Approved request is missing an approval expiry.");
+    return jsonError(410, "Approval is no longer valid. Submit a new request.");
   }
 
   const expiresAt = new Date(sessionRequest.activation_code_expires_at);

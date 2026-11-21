@@ -45,6 +45,31 @@ it("wrong username and another pending candidate cannot recover access", async (
   await expect(request(candidate, "other")).rejects.toThrow("recovery_unavailable");
   await request(); await expect(request("d".repeat(64))).rejects.toThrow("recovery_pending");
 });
+it.each(["revoked", "completed", "expired"])("does not restore a %s session ended after approval", async status => {
+  await db.query("insert into sessions(device_id,status,starts_at) values($1,'active',now())", [device]);
+  await request(); await decide();
+  await db.query("update sessions set status=$1 where device_id=$2", [status, device]);
+  expect(await request()).toMatchObject({ status: "approved", deviceId: device, sessionId: null });
+  expect((await db.query("select status from sessions")).rows).toEqual([{ status }]);
+});
+it("approval retry without any session restores identity without creating a session", async () => {
+  await request(); await decide();
+  const first = await request();
+  expect(first).toMatchObject({ status: "approved", sessionId: null });
+  expect(await request()).toEqual(first);
+  expect((await db.query("select id from sessions")).rows).toHaveLength(0);
+});
+it("a late pickup after the account is archived does not return an approved identity", async () => {
+  await request(); await decide();
+  await db.query("update subs set status='archived' where id=$1", [sub]);
+  await expect(request()).rejects.toThrow("recovery_unavailable");
+});
+it("retries with the rejected candidate neither reopen the request nor change the device", async () => {
+  await request(); await decide(false);
+  for (let n = 0; n < 2; n++) await expect(request()).rejects.toThrow("recovery_rejected");
+  expect((await db.query("select status from device_recovery_requests")).rows).toEqual([{ status: "rejected" }]);
+  expect((await db.query("select device_secret_hash from devices")).rows).toEqual([{ device_secret_hash: old }]);
+});
 it("rejected and expired requests cannot rotate credentials", async () => {
   await request(); await decide(false); await expect(request()).rejects.toThrow("recovery_rejected");
   await request("e".repeat(64));
